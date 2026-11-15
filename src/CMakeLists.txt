@@ -88,7 +88,12 @@ if (WIN32)
         PRIVATE
         windows-cli.cpp)
     set_target_properties(flameshot-cli PROPERTIES OUTPUT_NAME "flameshot-cli")
-    target_link_options(flameshot-cli PRIVATE /SUBSYSTEM:CONSOLE)
+    if (MSVC)
+        target_link_options(flameshot-cli PRIVATE /SUBSYSTEM:CONSOLE)
+    elseif (MINGW)
+        # windows-cli.cpp defines wmain(); MinGW needs the unicode CRT entry.
+        target_link_options(flameshot-cli PRIVATE -municode)
+    endif ()
     set_property(TARGET flameshot PROPERTY WIN32_EXECUTABLE true)
     # Getting error D8016 - /utf-8 automatically set by current cmake/msvc ?
     #if (MSVC)
@@ -269,6 +274,13 @@ if (WIN32)
             flameshot
             qhotkey
     )
+    if (MINGW)
+        # MSVC gets these through #pragma comment(lib, ...); MinGW does not.
+        target_link_libraries(flameshot shell32 ole32 uuid user32 dbghelp
+                                      uiautomationcore oleaut32)
+    else ()
+        target_link_libraries(flameshot dbghelp)
+    endif ()
 endif ()
 
 # Choose default color palette (small or large)
@@ -429,6 +441,25 @@ if (WIN32)
                 ${CMAKE_BINARY_DIR}/windeployqt_stuff/translations)
 
         install(DIRECTORY ${CMAKE_BINARY_DIR}/windeployqt_stuff/ DESTINATION bin)
+
+        if (MINGW)
+            # windeployqt --compiler-runtime only handles the MSVC redist.
+            # A MinGW Qt build also needs zlib1.dll, libharfbuzz-0.dll,
+            # libpcre2-16-0.dll and friends, which windeployqt silently drops.
+            # Walk the import tables and copy the whole closure instead.
+            get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+            find_program(MINGW_OBJDUMP_EXE objdump.exe PATHS "${MINGW_BIN_DIR}" NO_DEFAULT_PATH)
+            if (MINGW_OBJDUMP_EXE)
+                add_custom_command(
+                        TARGET flameshot
+                        POST_BUILD
+                        COMMAND ${CMAKE_COMMAND}
+                        -DOBJDUMP=${MINGW_OBJDUMP_EXE}
+                        -DBIN_DIR=${CMAKE_BINARY_DIR}/windeployqt_stuff
+                        "-DEXTRA_DIRS=${MINGW_BIN_DIR}"
+                        -P ${PROJECT_SOURCE_DIR}/cmake/copy_windows_runtime.cmake)
+            endif ()
+        endif ()
 
 
         STRING(REGEX REPLACE "\\\\" "/" OPENSSL_ROOT_DIR "$ENV{OPENSSL_ROOT_DIR}" )

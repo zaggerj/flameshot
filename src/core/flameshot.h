@@ -21,7 +21,6 @@ class UploadHistory;
 #if (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
 class QHotkey;
 #endif
-
 enum ErrCode : uint8_t
 {
     E_OK = 0,
@@ -64,6 +63,16 @@ public slots:
 
     QVersionNumber getVersion();
 
+    /// True while this process has a capture overlay on screen.
+    bool hasCaptureWindow() const;
+    /// Re-focus an overlay that is already open instead of stacking another.
+    void raiseCaptureWindow();
+    /// Restart the overlay on another monitor (used by the Tab switch).
+    void requestCaptureOnMonitor(int monitorIndex);
+    /// Leave the overlay behind and run a scrolling capture. `region` is a
+    /// logical, screen-global rectangle (empty: let the user pick one).
+    void requestScrollCapture(const QRect& region);
+
 public:
     static void setOrigin(Origin origin);
     static Origin origin();
@@ -93,6 +102,11 @@ private:
     QPointer<CaptureLauncher> m_launcherWindow;
     QPointer<ConfigWindow> m_configWindow;
 
+    // Monitor the next capture should use (Tab switch inside the overlay).
+    int m_pendingMonitor = -1;
+    // Scroll region handed over by the overlay's scroll button.
+    QRect m_pendingScrollRegion;
+
 #if defined(Q_OS_MACOS)
 public:
     void showDockIcon(QWidget* window);
@@ -102,7 +116,7 @@ private:
     int m_dockIconVisibleCount = 0;
 #endif
 
-#if (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
+#if defined(Q_OS_MACOS)
     QHotkey* m_HotkeyScreenshotCapture;
 #endif
 #if (defined(Q_OS_MACOS) && ENABLE_IMGUR)

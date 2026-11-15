@@ -82,6 +82,11 @@ if(USE_PORTABLE_CONFIG)
 add_compile_definitions(USE_PORTABLE_CONFIG)
 endif()
 
+option(ENABLE_SELFTEST "Build the hidden 'selftest' render-verification command" OFF)
+if(ENABLE_SELFTEST)
+  add_compile_definitions(ENABLE_SELFTEST)
+endif()
+
 option(FLAMESHOT_DEBUG_CAPTURE "Enable mode to make debugging easier" OFF)
 option(USE_MONOCHROME_ICON "Build using monochrome icon as default" OFF)
 option(GENERATE_TS "Regenerate translation source files" OFF)

@@ -32,6 +32,7 @@
 #include <QCheckBox>
 #include <QDateTime>
 #include <QFontMetrics>
+#include <QLabel>
 #include <QMessageBox>
 #include <QPaintEvent>
 #include <QPainter>
@@ -204,6 +205,11 @@ CaptureWidget::CaptureWidget(const CaptureRequest& req,
 #endif
     }
 
+    if (selectedScreen != nullptr) {
+        m_monitorIndex =
+          QGuiApplication::screens().indexOf(selectedScreen);
+    }
+
     QVector<QRect> areas;
     if (m_context.fullscreen) {
         // Always display on a single screen, normalized to (0, 0)
@@ -296,6 +302,8 @@ CaptureWidget::CaptureWidget(const CaptureRequest& req,
         OverlayMessage::push(m_helpMessage);
     }
 
+    initMonitorBadge();
+
     initQuitPrompt();
 
     updateCursor();
@@ -326,7 +334,7 @@ CaptureWidget::~CaptureWidget()
         geometry.setTopLeft(geometry.topLeft() + m_context.widgetOffset);
         Flameshot::instance()->exportCapture(
           pixmap(), geometry, m_context.request);
-    } else {
+    } else if (!m_scrollCaptureHandoff) {
         emit Flameshot::instance()->captureFailed();
     }
 }
@@ -466,6 +474,62 @@ void CaptureWidget::showxywh()
     if (timeout != 0) {
         m_xywhTimer.start(timeout);
     }
+}
+
+void CaptureWidget::initMonitorBadge()
+{
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    if (screens.size() < 2 || m_monitorIndex < 0 ||
+        m_monitorIndex >= screens.size()) {
+        return;
+    }
+
+    const QRect geom = screens[m_monitorIndex]->geometry();
+
+    auto* badge = new QLabel(this);
+    badge->setObjectName(QStringLiteral("monitorBadge"));
+    badge->setAttribute(Qt::WA_TransparentForMouseEvents);
+    badge->setStyleSheet(
+      QStringLiteral("#monitorBadge { background: rgba(0,0,0,205);"
+                     " color: #ffffff; border-radius: 9px;"
+                     " padding: 7px 14px; font-size: 13px; }"));
+    // Purely informational, Chinese on purpose: the fork ships a Chinese UI
+    // and this string is generated at runtime, so it has no .ts entry.
+    badge->setText(QStringLiteral("屏幕 %1/%2 · %3×%4　　按 Tab 切换到下一个屏幕")
+                     .arg(m_monitorIndex + 1)
+                     .arg(screens.size())
+                     .arg(geom.width())
+                     .arg(geom.height()));
+    badge->adjustSize();
+    badge->move(qMax(8, (width() - badge->width()) / 2), 22);
+    badge->show();
+    badge->raise();
+    m_monitorBadge = badge;
+
+    QTimer::singleShot(4000, badge, [badge]() { badge->hide(); });
+}
+
+/**
+ * @brief Re-open the region selector on the next monitor.
+ *
+ * With monitors stacked vertically (or a laptop plus an external screen) the
+ * overlay only covers the screen under the cursor. Without this the only way
+ * to reach the other screen was to move the mouse there and press the hotkey
+ * again, and nothing on screen said which monitor was being captured.
+ */
+void CaptureWidget::switchMonitor()
+{
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    if (screens.size() < 2 || m_monitorIndex < 0) {
+        return;
+    }
+    const int next = (m_monitorIndex + 1) % screens.size();
+    if (m_monitorBadge != nullptr) {
+        m_monitorBadge->hide();
+    }
+    hide();
+    Flameshot::instance()->requestCaptureOnMonitor(next);
+    close();
 }
 
 void CaptureWidget::initHelpMessage()
@@ -1075,6 +1139,21 @@ void CaptureWidget::setToolSize(int size)
     m_context.toolSize = qBound(1, size, maxToolSize);
     updateTool(activeButtonTool());
 
+    // A counter bubble that already sits on the canvas can be resized as well.
+    // The wheel (and the size keys) used to only affect the marker that was
+    // about to be drawn, so a placed number kept its size forever.
+    const int activeLayer =
+      m_panel != nullptr ? m_panel->activeLayerIndex() : -1;
+    if (activeLayer >= 0 && activeLayer < m_captureToolObjects.size()) {
+        CaptureTool* selected = m_captureToolObjects.at(activeLayer);
+        if (selected != nullptr &&
+            selected->type() == CaptureTool::TYPE_CIRCLECOUNT) {
+            const QRect before = paddedUpdateRect(selected->boundingRect());
+            selected->onSizeChanged(m_context.toolSize);
+            update(before.united(paddedUpdateRect(selected->boundingRect())));
+        }
+    }
+
     QScreen* topLeftScreen = QGuiAppCurrentScreen().currentScreen();
     QPoint topLeft(0, 0);
     if (topLeftScreen) {
@@ -1096,6 +1175,16 @@ void CaptureWidget::setToolSize(int size)
 
 void CaptureWidget::keyPressEvent(QKeyEvent* e)
 {
+#if defined(Q_OS_WIN)
+    // Tab moves the whole overlay to the next monitor. Handled before the
+    // selection check so it also works before the user drags anything.
+    if (e->key() == Qt::Key_Tab && QGuiApplication::screens().size() > 1) {
+        switchMonitor();
+        e->accept();
+        return;
+    }
+#endif
+
     // If the key is a digit, change the tool size
     bool ok;
     int digit = e->text().toInt(&ok);
@@ -1501,6 +1590,20 @@ void CaptureWidget::handleToolSignal(CaptureTool::Request r)
         case CaptureTool::REQ_DECREASE_TOOL_SIZE:
             setToolSize(m_context.toolSize - 1);
             break;
+        case CaptureTool::REQ_SCROLL_CAPTURE: {
+            // The editor is showing a frozen picture of the screen, so
+            // scrolling underneath it would never reach the stitches. Hand
+            // the selection over to the scrolling capture, which runs on the
+            // live desktop, and step out of its way.
+            QRect region;
+            if (m_selection != nullptr && !m_context.selection.isEmpty()) {
+                region = m_context.selection.translated(m_context.widgetOffset);
+            }
+            m_scrollCaptureHandoff = true;
+            Flameshot::instance()->requestScrollCapture(region);
+            close();
+            break;
+        }
         case CaptureTool::REQ_COMMIT_CURRENT_TOOL: {
             const bool editingExistingTool =
               m_activeTool && m_activeTool->editMode();
@@ -1669,6 +1772,53 @@ void CaptureWidget::removeToolObject(int index)
 
 void CaptureWidget::initShortcuts()
 {
+    // Tool size up/down. The keys were configurable but nothing was wired to
+    // them, so a size could only be changed with the wheel, the side panel or
+    // by typing digits.
+    //
+    // [ and ] stay the configured bindings; Ctrl+= / Ctrl+- are always
+    // available as well because they are what people reach for when they want
+    // to zoom, and because a bare bracket is swallowed by some IMEs.
+    auto bindSizeStep = [this](const char* action,
+                               int delta,
+                               const QList<QKeySequence>& alwaysOn) {
+        QStringList sequences;
+        const QString configured =
+          ConfigHandler().shortcut(QString::fromLatin1(action));
+        if (!configured.isEmpty()) {
+            sequences << configured;
+        }
+        for (const QKeySequence& sequence : alwaysOn) {
+            sequences << sequence.toString();
+        }
+
+        for (const QString& text : sequences) {
+            const QKeySequence sequence(text);
+            if (sequence.isEmpty()) {
+                continue;
+            }
+            auto* shortcut = new QShortcut(sequence, this);
+            connect(shortcut, &QShortcut::activated, this, [this, delta]() {
+                setToolSize(qBound(1, m_context.toolSize + delta, maxToolSize));
+            });
+        }
+    };
+    // Always available, no configuration needed: the bracket keys that the
+    // config exposes, plus the two chords and the two bare keys everybody
+    // actually reaches for when they want to zoom something. The bare keys are
+    // safe here because the editor has no text input.
+    bindSizeStep("TYPE_SIZEINCREASE",
+                 1,
+                 { QKeySequence("Ctrl+="),
+                   QKeySequence("Ctrl++"),
+                   QKeySequence("="),
+                   QKeySequence("+") });
+    bindSizeStep("TYPE_SIZEDECREASE",
+                 -1,
+                 { QKeySequence("Ctrl+-"),
+                   QKeySequence("-"),
+                   QKeySequence("Ctrl+_") });
+
     newShortcut(
       QKeySequence(ConfigHandler().shortcut("TYPE_UNDO")), this, SLOT(undo()));
 

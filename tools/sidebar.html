@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SCROLL-TEST-SIDEBAR</title>
+<style>
+  html,body{margin:0;padding:0;background:#fff;font:20px Arial;}
+  /* A chat-app style fixed left panel: it never scrolls, so a naive stitcher
+     pastes the whole list again for every frame and the long image ends up
+     showing the same 500px sidebar a dozen times. */
+  #side{position:fixed;left:0;top:0;bottom:0;width:300px;background:#0f1720;
+        color:#8ed6ff;font-size:14px;padding:12px;box-sizing:border-box;
+        overflow:hidden;}
+  #side h3{margin:6px 0 10px;color:#cfe9ff;font-size:15px;}
+  .conv{padding:7px 8px;border-radius:8px;background:#16202b;margin-bottom:7px;}
+  .conv b{color:#e8f4ff;font-size:13px;}
+  .conv span{display:block;color:#5f7688;font-size:12px;}
+  #content{margin-left:300px;padding:18px 36px;}
+  .row{height:96px;display:flex;align-items:center;justify-content:space-between;
+       padding:0 24px;border-bottom:2px solid #101010;box-sizing:border-box;
+       font-size:22px;color:#fff;}
+</style></head><body>
+<div id="side">
+  <h3>Conversations</h3>
+  <div id="convlist"></div>
+</div>
+<div id="content"></div>
+<script>
+const conv = document.getElementById('convlist');
+for (let i = 1; i <= 24; i++) {
+  const d = document.createElement('div');
+  d.className = 'conv';
+  d.innerHTML = '<b>Session ' + i + ' — audit log</b><span>2 days ago · IDEA-4' +
+                (100 + i) + '</span>';
+  conv.appendChild(d);
+}
+// Deterministic palette so every row is uniquely identifiable in the stitched
+// image; a repeated row means the stitcher duplicated content.
+const palette = ['#1f6feb','#238636','#8957e5','#bb8009','#a5303c','#0c7b93'];
+const content = document.getElementById('content');
+const frag = document.createDocumentFragment();
+for (let i = 0; i < 90; i++) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.style.background = palette[i % palette.length];
+  row.textContent = 'ROW ' + String(i + 1).padStart(3, '0') + ' — content line ' +
+                    (i + 1) + ' of 90';
+  frag.appendChild(row);
+}
+content.appendChild(frag);
+</script>
+</body></html>

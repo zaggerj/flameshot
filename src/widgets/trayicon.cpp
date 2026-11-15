@@ -3,8 +3,12 @@
 #include "core/flameshot.h"
 #include "core/flameshotdaemon.h"
 #include "core/qguiappcurrentscreen.h"
+#include "utils/abstractlogger.h"
 #include "utils/confighandler.h"
 #include "utils/globalvalues.h"
+#if defined(Q_OS_WIN)
+#include "utils/scrollcapture.h"
+#endif
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -76,6 +80,14 @@ TrayIcon::TrayIcon(QObject* parent)
 #endif
 
     show(); // TODO needed?
+    // Diagnostic: "no tray icon" reports usually mean the daemon exited (the
+    // old shortcut ran `gui`) or the shell has no notification area. One log
+    // line tells the two apart without touching the user's desktop.
+    AbstractLogger::info(AbstractLogger::LogFile)
+      << QStringLiteral("Tray icon created (system tray available: %1, "
+                        "visible: %2)")
+           .arg(QSystemTrayIcon::isSystemTrayAvailable() ? "yes" : "no",
+                isVisible() ? "yes" : "no");
 
     if (ConfigHandler().showStartupLaunchMessage()) {
         showMessage(
@@ -130,6 +142,23 @@ void TrayIcon::initMenu()
     });
 #endif
     });
+#if defined(Q_OS_WIN)
+    // ShareX, PicPick and every other Windows capture tool expose scrolling
+    // capture from the tray menu; a hotkey-only entry point means users who
+    // "click the feature" never find it. Same 400ms grace so the menu closes
+    // before the fullscreen overlay appears.
+    m_scrollCaptureAction =
+      new QAction(QStringLiteral("滚动截图 (Scrolling Capture)"), this);
+    connect(m_scrollCaptureAction, &QAction::triggered, this, [this]() {
+        QTimer::singleShot(400, this, []() {
+            auto* capture = ScrollCapture::instance();
+            if (capture->isActive()) {
+                return;
+            }
+            capture->start();
+        });
+    });
+#endif
     m_launcherAction = new QAction(tr("&Open Launcher"), this);
     connect(m_launcherAction,
             &QAction::triggered,
@@ -191,6 +220,9 @@ void TrayIcon::initMenu()
             &Flameshot::openSavePath);
 
     m_menu->addAction(m_captureAction);
+#if defined(Q_OS_WIN)
+    m_menu->addAction(m_scrollCaptureAction);
+#endif
     m_menu->addAction(m_launcherAction);
     m_menu->addSeparator();
 #ifdef ENABLE_IMGUR

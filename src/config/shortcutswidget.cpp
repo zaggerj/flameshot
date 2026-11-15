@@ -216,15 +216,14 @@ void ShortcutsWidget::loadShortcuts()
     appendShortcut("SCREENSHOT_HISTORY", tr("Screenshot history"));
 #endif
 #elif defined(Q_OS_WIN)
-    if (this->isPrintScreenKeyForSnippingDisabled()) {
-        m_shortcuts << (QStringList() << "" << QObject::tr("Capture screen")
-                                      << "Print Screen");
-    }
-    appendShortcut("TAKE_SCREENSHOT", tr("Capture screen"));
-#ifdef ENABLE_IMGUR
-    m_shortcuts << (QStringList() << "" << QObject::tr("Screenshot history")
-                                  << "Shift+Print Screen");
-#endif
+    // All Windows global hotkeys are user configurable. An empty value
+    // disables the binding entirely (set with Backspace in the dialog).
+    appendShortcut("TAKE_SCREENSHOT", tr("Capture screen (global)"));
+    appendShortcut("CAPTURE_PRTSC",
+                   tr("Capture screen, secondary (global)"));
+    appendShortcut("HISTORY_PRTSC",
+                   tr("Screenshot history / open save folder (global)"));
+    appendShortcut("SCROLL_CAPTURE", tr("Scrolling capture (global)"));
 #else
     // TODO - Linux doesn't support global shortcuts for (XServer and Wayland),
     // possibly it will be solved in the QHotKey library later. So it is

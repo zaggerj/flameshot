@@ -126,6 +126,7 @@ private:
     void initShortcuts();
     void initButtons();
     void initHelpMessage();
+    void initMonitorBadge();
     void initQuitPrompt();
     void updateSizeIndicator();
     void updateCursor();
@@ -156,6 +157,9 @@ private:
     CaptureTool* activeButtonTool() const;
     CaptureTool::Type activeButtonToolType() const;
 
+    /// Move the overlay to the next monitor (Windows multi-screen desktops).
+    void switchMonitor();
+
     QPoint snapToGrid(const QPoint& point) const;
 
     ////////////////////////////////////////
@@ -164,6 +168,9 @@ private:
     // Context information
     CaptureContext m_context;
     QScreen* m_selectedScreen = nullptr;
+    // Which monitor this overlay covers, and the badge that tells the user.
+    int m_monitorIndex = -1;
+    QLabel* m_monitorBadge = nullptr;
 
     // Main ui color
     QColor m_uiColor;
@@ -179,6 +186,9 @@ private:
     bool m_newSelection;
     bool m_movingSelection;
     bool m_captureDone;
+    // The overlay was closed on purpose in favour of the scrolling capture.
+    // Nothing has to be exported and no "capture failed" is reported.
+    bool m_scrollCaptureHandoff = false;
     bool m_previewEnabled;
     bool m_adjustmentButtonPressed;
     bool m_configError;

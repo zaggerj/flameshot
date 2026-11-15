@@ -43,6 +43,13 @@ ConfigWindow::ConfigWindow(QWidget* parent)
     setWindowIcon(QIcon(GlobalValues::iconPath()));
     setWindowTitle(tr("Configuration"));
 
+    // The tab pages have no natural width: laid out from their size hints the
+    // window came up ~510 px wide, which clipped every long option label and
+    // squeezed the tab bar. Give it a readable floor and a comfortable size;
+    // the layout still grows if a page needs more room.
+    setMinimumWidth(760);
+    resize(820, 760);
+
     connect(ConfigHandler::getInstance(),
             &ConfigHandler::fileChanged,
             this,

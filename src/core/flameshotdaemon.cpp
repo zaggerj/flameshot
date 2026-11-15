@@ -13,6 +13,7 @@
 #include <QIODevice>
 #include <QPixmap>
 #include <QRect>
+#include <QTimer>
 
 #if !(defined(Q_OS_MACOS) || defined(Q_OS_WIN))
 #include <QDBusConnection>
@@ -37,6 +38,7 @@
 
 #ifdef Q_OS_WIN
 #include "core/globalshortcutfilter.h"
+#include "utils/scrollcapture.h"
 #endif
 
 namespace {
@@ -391,9 +393,61 @@ void FlameshotDaemon::initTrayIcon()
         enableTrayIcon(true);
     }
 #if defined(Q_OS_WIN)
-    GlobalShortcutFilter* nativeFilter = new GlobalShortcutFilter(this);
+    auto* nativeFilter = new GlobalShortcutFilter(this);
     qApp->installNativeEventFilter(nativeFilter);
+
+    connect(nativeFilter,
+            &GlobalShortcutFilter::captureRequested,
+            Flameshot::instance(),
+            []() {
+                Flameshot* flameshot = Flameshot::instance();
+                // A held hotkey or a second press must not stack overlays.
+                if (flameshot->hasCaptureWindow()) {
+                    flameshot->raiseCaptureWindow();
+                    return;
+                }
+                flameshot->requestCapture(
+                  CaptureRequest(CaptureRequest::GRAPHICAL_MODE));
+            });
+    connect(nativeFilter,
+            &GlobalShortcutFilter::historyRequested,
+            Flameshot::instance(),
+            []() {
+#ifdef ENABLE_IMGUR
+                Flameshot::instance()->history();
+#else
+                Flameshot::instance()->openSavePath();
 #endif
+            });
+    connect(nativeFilter,
+            &GlobalShortcutFilter::scrollCaptureRequested,
+            Flameshot::instance(),
+            []() {
+#if defined(Q_OS_WIN)
+                // Never start a scroll capture on top of the region selector
+                // or a running session: the singleton would re-enter itself.
+                if (ScrollCapture::instance()->isActive()) {
+                    return;
+                }
+                ScrollCapture::instance()->start();
+#endif
+            });
+    connect(ConfigHandler::getInstance(),
+            &ConfigHandler::fileChanged,
+            nativeFilter,
+            &GlobalShortcutFilter::reloadShortcuts);
+#endif
+
+    startWatchdog();
+
+    // "The tray icon disappeared" must be answerable from the log: record the
+    // quit reason and the pid, so a stopped daemon is distinguishable from a
+    // daemon that is still running but lost its icon.
+    connect(qApp, &QCoreApplication::aboutToQuit, this, []() {
+        AbstractLogger::info(AbstractLogger::LogFile)
+          << QStringLiteral("Daemon quitting (pid=%1)")
+               .arg(QCoreApplication::applicationPid());
+    });
 }
 
 void FlameshotDaemon::enableTrayIcon(bool enable)
@@ -407,6 +461,85 @@ void FlameshotDaemon::enableTrayIcon(bool enable)
         }
     } else if (m_trayIcon) {
         m_trayIcon->hide();
+    }
+}
+
+void FlameshotDaemon::startWatchdog()
+{
+    if (m_trayWatchdog != nullptr) {
+        return;
+    }
+    m_trayWatchdog = new QTimer(this);
+    m_trayWatchdog->setInterval(5000);
+    connect(m_trayWatchdog,
+            &QTimer::timeout,
+            this,
+            &FlameshotDaemon::ensureTrayIcon);
+    m_trayWatchdog->start();
+    AbstractLogger::info(AbstractLogger::LogFile)
+      << QStringLiteral("Tray watchdog started (interval 5000ms)");
+}
+
+void FlameshotDaemon::shutdownForExit()
+{
+    if (m_shuttingDown) {
+        return;
+    }
+    m_shuttingDown = true;
+    if (m_trayWatchdog != nullptr) {
+        m_trayWatchdog->stop();
+    }
+    if (m_trayIcon != nullptr) {
+        // hide() sends NIM_DELETE, which is what tells Explorer to forget the
+        // icon. Exiting without it leaves a dead icon behind.
+        m_trayIcon->hide();
+    }
+    AbstractLogger::info(AbstractLogger::LogFile)
+      << QStringLiteral("Daemon shutting down gracefully (pid=%1)")
+           .arg(QCoreApplication::applicationPid());
+    QTimer::singleShot(250, qApp, []() { QCoreApplication::quit(); });
+}
+
+void FlameshotDaemon::ensureTrayIcon()
+{
+    if (m_shuttingDown) {
+        return;
+    }
+    if (ConfigHandler().disabledTrayIcon()) {
+        // The user asked for no tray entry; that is not a failure.
+        return;
+    }
+
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+        if (!m_trayShellMissing) {
+            m_trayShellMissing = true;
+            AbstractLogger::warning(AbstractLogger::LogFile)
+              << QStringLiteral("Notification area is not available; the tray "
+                                "icon will be re-added when the shell returns");
+        }
+        return;
+    }
+    if (m_trayShellMissing) {
+        m_trayShellMissing = false;
+        AbstractLogger::info(AbstractLogger::LogFile)
+          << QStringLiteral("Notification area is back");
+    }
+
+    if (m_trayIcon == nullptr) {
+        m_trayIcon = new TrayIcon();
+        AbstractLogger::info(AbstractLogger::LogFile)
+          << QStringLiteral("Tray icon was missing, recreated");
+        return;
+    }
+
+    if (!m_trayIcon->isVisible()) {
+        // Explorer restarted (TaskbarCreated) or the shell dropped the icon.
+        // show() re-registers it; the daemon keeps running either way.
+        m_trayIcon->show();
+        AbstractLogger::info(AbstractLogger::LogFile)
+          << QStringLiteral("Tray icon was not visible, re-registered "
+                            "(visible now: %1)")
+               .arg(m_trayIcon->isVisible() ? "yes" : "no");
     }
 }
 

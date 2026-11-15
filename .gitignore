@@ -82,3 +82,9 @@ result-*
 
 # direnv
 .direnv
+
+# zagger fork build artifacts
+installer/payload.bin
+installer/installer.res
+installer/*.exe
+tools/*.exe

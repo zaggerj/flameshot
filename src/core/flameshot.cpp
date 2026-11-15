@@ -3,7 +3,11 @@
 
 #include "flameshot.h"
 #include "core/flameshotdaemon.h"
-#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+#include "utils/scrollcapture.h"
+#include "utils/windowforeground.h"
+
+#include <QTimer>
+#if defined(Q_OS_MACOS)
 #include "qhotkey.h"
 #endif
 
@@ -96,7 +100,7 @@ void raiseAboveMenuBar(QWidget* widget)
 Flameshot::Flameshot()
   : m_haveExternalWidget(false)
   , m_captureWindow(nullptr)
-#if (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
+#if defined(Q_OS_MACOS)
   , m_HotkeyScreenshotCapture(nullptr)
 #endif
 #if (defined(Q_OS_MACOS) && ENABLE_IMGUR)
@@ -112,14 +116,33 @@ Flameshot::Flameshot()
         CGRequestScreenCaptureAccess();
     }
 #endif
-#if (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
-    // Set global shortcuts for MacOS or Windows
+#if defined(Q_OS_MACOS)
+    // Set global shortcuts for MacOS. Windows goes through
+    // GlobalShortcutFilter: registering the same chord here as well made the
+    // second RegisterHotKey fail (error 1409) in every capture process and
+    // left a hotkey owner that was not the tray daemon.
     m_HotkeyScreenshotCapture = new QHotkey(
       QKeySequence(ConfigHandler().shortcut("TAKE_SCREENSHOT")), true, this);
     QObject::connect(m_HotkeyScreenshotCapture,
                      &QHotkey::activated,
                      qApp,
                      [this]() { gui(); });
+
+    // Apply global shortcut changes immediately instead of requiring a
+    // restart. ConfigHandler emits fileChanged whenever the ini file is
+    // written (including changes made from the settings dialog).
+    QObject::connect(ConfigHandler::getInstance(),
+                     &ConfigHandler::fileChanged,
+                     this,
+                     [this]() {
+                         const QKeySequence sequence(
+                           ConfigHandler().shortcut("TAKE_SCREENSHOT"));
+                         if (m_HotkeyScreenshotCapture->shortcut() !=
+                             sequence) {
+                             m_HotkeyScreenshotCapture->setShortcut(sequence,
+                                                                    true);
+                         }
+                     });
 #endif
 #if (defined(Q_OS_MACOS) && ENABLE_IMGUR)
     m_HotkeyScreenshotHistory = new QHotkey(
@@ -148,6 +171,19 @@ CaptureWidget* Flameshot::gui(const CaptureRequest& req)
         request.initialSelection().isNull() &&
         ConfigHandler().saveLastRegion()) {
         request.setInitialSelection(getLastRegion());
+    }
+
+    // The overlay asked for another monitor (Tab) before closing itself.
+    if (!request.hasSelectedMonitor() && m_pendingMonitor >= 0) {
+        request.setSelectedMonitor(m_pendingMonitor);
+        m_pendingMonitor = -1;
+    }
+
+    // An overlay that was hidden on purpose (monitor switch) is still alive
+    // until deleteLater runs; drop it so the replacement can be created.
+    if (!m_captureWindow.isNull() && !m_captureWindow->isVisible()) {
+        m_captureWindow->deleteLater();
+        m_captureWindow = nullptr;
     }
 
 #if defined(Q_OS_MACOS)
@@ -186,6 +222,9 @@ CaptureWidget* Flameshot::gui(const CaptureRequest& req)
 
 #ifdef Q_OS_WIN
         m_captureWindow->show();
+        // A hotkey launched from the tray daemon does not own the foreground,
+        // so Windows would leave the overlay unfocused and drop Esc / Ctrl+C.
+        FlameshotWindow::forceForeground(m_captureWindow);
 #elif defined(Q_OS_MACOS)
         if (ConfigHandler().useNativeFullscreen()) {
             m_captureWindow->showFullScreen();
@@ -201,6 +240,9 @@ CaptureWidget* Flameshot::gui(const CaptureRequest& req)
 #endif
         return m_captureWindow;
     } else {
+        // An overlay is already open (typically the user pressed the hotkey
+        // twice): surface it instead of silently doing nothing.
+        raiseCaptureWindow();
         emit captureFailed();
         return nullptr;
     }
@@ -398,6 +440,61 @@ QVersionNumber Flameshot::getVersion()
 {
     return QVersionNumber::fromString(
       QStringLiteral(APP_VERSION).replace("v", ""));
+}
+
+/**
+ * @brief Is a capture overlay already on screen in this process?
+ *
+ * The tray daemon answers hotkeys itself, so a forwarded "capture" request
+ * must not stack a second overlay on top of the first one.
+ */
+bool Flameshot::hasCaptureWindow() const
+{
+    return !m_captureWindow.isNull();
+}
+
+void Flameshot::raiseCaptureWindow()
+{
+    if (m_captureWindow.isNull()) {
+        return;
+    }
+    m_captureWindow->show();
+    m_captureWindow->raise();
+#if defined(Q_OS_WIN)
+    FlameshotWindow::forceForeground(m_captureWindow);
+#else
+    m_captureWindow->activateWindow();
+#endif
+}
+
+/**
+ * @brief Re-open the region selector on another monitor.
+ *
+ * The old overlay hides itself immediately and calls this; the short delay
+ * lets its deferred deletion finish before the replacement is built, so two
+ * full-screen windows never coexist.
+ */
+void Flameshot::requestCaptureOnMonitor(int monitorIndex)
+{
+    m_pendingMonitor = monitorIndex;
+    QTimer::singleShot(80, this, [this]() {
+        requestCapture(CaptureRequest(CaptureRequest::GRAPHICAL_MODE));
+    });
+}
+
+void Flameshot::requestScrollCapture(const QRect& region)
+{
+    // The overlay that triggered this is still on screen (it closes at the end
+    // of the same call), and it is a frozen picture anyway: the scrolling has
+    // to happen on the live desktop. Give the window a moment to disappear,
+    // then take over. Doing it from a timer also keeps the scrolling session
+    // out of the overlay's own event handler, which is about to be destroyed.
+    m_pendingScrollRegion = region;
+    QTimer::singleShot(150, this, [this]() {
+        const QRect pending = m_pendingScrollRegion;
+        m_pendingScrollRegion = QRect();
+        ScrollCapture::instance()->start(pending);
+    });
 }
 
 void Flameshot::setOrigin(Origin origin)

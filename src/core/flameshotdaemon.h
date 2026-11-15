@@ -9,6 +9,7 @@
 
 class QPixmap;
 class QRect;
+class QTimer;
 class QDBusMessage;
 class QDBusConnection;
 class TrayIcon;
@@ -36,6 +37,15 @@ public:
       const QString& text,
       const QString& title = QStringLiteral("Flameshot Info"),
       const int timeout = 5000);
+
+    /**
+     * @brief Hide the tray icon (NIM_DELETE) and quit.
+     *
+     * Killing the daemon leaves a dead icon in the notification area that the
+     * shell keeps showing until the user hovers it, and every upgrade used to
+     * add one more. The installer and `flameshot quit` both go through here.
+     */
+    void shutdownForExit();
 
 #if defined(USE_KDSINGLEAPPLICATION) &&                                        \
   (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
@@ -71,6 +81,12 @@ private:
 
     void initTrayIcon();
     void enableTrayIcon(bool enable);
+    // Keeps the notification area entry alive. Explorer restarts, a shell that
+    // is not ready at login and a killed-not-closed process all remove the
+    // icon while the daemon keeps running; without this the user is left
+    // without any way to reach the application.
+    void ensureTrayIcon();
+    void startWatchdog();
 
 #if !(defined(Q_OS_MACOS) || defined(Q_OS_WIN))
     static QDBusMessage createMethodCall(const QString& method);
@@ -83,6 +99,9 @@ private:
     bool m_clipboardSignalBlocked;
     QList<QWidget*> m_widgets;
     TrayIcon* m_trayIcon;
+    QTimer* m_trayWatchdog = nullptr;
+    bool m_trayShellMissing = false;
+    bool m_shuttingDown = false;
 
 #if !defined(DISABLE_UPDATE_CHECKER)
     QString m_appLatestUrl;

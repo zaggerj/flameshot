@@ -24,6 +24,17 @@
 
 // HELPER FUNCTIONS
 
+#if defined(Q_OS_WIN)
+// The autostart entry has to keep the process alive without showing a window,
+// so it asks for the daemon explicitly. The executable path is quoted because
+// an install directory may contain spaces.
+QString windowsLaunchCommand()
+{
+    return QStringLiteral("\"%1\" daemon")
+      .arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()));
+}
+#endif
+
 bool verifyLaunchFile()
 {
 #if defined(Q_OS_UNIX)
@@ -36,9 +47,8 @@ bool verifyLaunchFile()
     QSettings bootUpSettings(
       "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
       QSettings::NativeFormat);
-    bool res =
-      bootUpSettings.value("Flameshot").toString() ==
-      QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+    bool res = bootUpSettings.value("Flameshot").toString() ==
+               windowsLaunchCommand();
 #endif
     return res;
 }
@@ -117,7 +127,10 @@ static QMap<class QString, QSharedPointer<ValueHandler>>
     // drawThickness shared by Pencil, Line, Arrow, Rectangular Selection, Circle
     OPTION("drawThickness"               ,LowerBoundedInt    ( 1, 3          )),
     OPTION("drawFontSize"                ,LowerBoundedInt    ( 1, 8          )),
-    OPTION("drawCircleCounterSize"       ,LowerBoundedInt    ( 1, 1          )),
+    // The counter bubble is the one tool that must be readable by default:
+    // size 1 is a 5 px dot, size 15 is a 33 px badge with a legible digit.
+    // It used to default to 1, which is why every marker came out as a dot.
+    OPTION("drawCircleCounterSize"       ,LowerBoundedInt    ( 1, 15          )),
     OPTION("drawCircleCounterOutline"    ,Bool               ( true          )),
     OPTION("drawPixelateSize"            ,LowerBoundedInt    ( 1, 2          )),
     OPTION("drawRectangleSize"           ,LowerBoundedInt    ( 1, 1          )),
@@ -168,6 +181,7 @@ static QMap<QString, QSharedPointer<KeySequence>> recognizedShortcuts = {
     SHORTCUT("TYPE_UNDO"                ,   "Ctrl+Z"                ),
     SHORTCUT("TYPE_COPY"                ,   "Ctrl+C"                ),
     SHORTCUT("TYPE_SAVE"                ,   "Ctrl+S"                ),
+    SHORTCUT("TYPE_SCROLLCAPTURE"       ,   "Ctrl+Shift+S"          ),
     SHORTCUT("TYPE_ACCEPT"              ,   "Return"                ),
     SHORTCUT("TYPE_EXIT"                ,   "Ctrl+Q"                ),
     SHORTCUT("TYPE_CANCEL"              ,   "Ctrl+Backspace"        ),
@@ -198,7 +212,13 @@ static QMap<QString, QSharedPointer<KeySequence>> recognizedShortcuts = {
     SHORTCUT("TYPE_MOVE_DOWN"           ,   "Down"                  ),
     SHORTCUT("TYPE_COMMIT_CURRENT_TOOL" ,   "Ctrl+Return"           ),
 #if defined(Q_OS_WIN)
-    SHORTCUT("TAKE_SCREENSHOT"          ,   "Meta+Shift+x"          ),
+    // Ctrl+Alt+A is the documented capture key on Windows; GlobalShortcutFilter
+    // registers it natively. Print / Shift+Print are deliberately left free so
+    // they do not fight with the built-in Windows screenshot tool.
+    SHORTCUT("TAKE_SCREENSHOT"          ,   "Ctrl+Alt+A"            ),
+    SHORTCUT("CAPTURE_PRTSC"            ,                           ),
+    SHORTCUT("HISTORY_PRTSC"            ,   "Ctrl+Alt+H"            ),
+    SHORTCUT("SCROLL_CAPTURE"           ,   "Ctrl+Alt+S"            ),
 #endif
 #if defined(Q_OS_MACOS)
     SHORTCUT("TYPE_DELETE_CURRENT_TOOL" ,   "Backspace"             ),
@@ -208,9 +228,10 @@ static QMap<QString, QSharedPointer<KeySequence>> recognizedShortcuts = {
     SHORTCUT("TYPE_DELETE_CURRENT_TOOL" ,   "Delete"                ),
 #endif
     SHORTCUT("TYPE_PIN"                 ,                           ),
-    SHORTCUT("TYPE_SIZEINCREASE"        ,                           ),
-    SHORTCUT("TYPE_SIZEDECREASE"        ,                           ),
-    SHORTCUT("TYPE_CIRCLECOUNT"         ,                           ),
+    // Tool size, in both directions. Digits still type an exact size.
+    SHORTCUT("TYPE_SIZEINCREASE"        ,   "]"                     ),
+    SHORTCUT("TYPE_SIZEDECREASE"        ,   "["                     ),
+    SHORTCUT("TYPE_CIRCLECOUNT"         ,   "N"                     ),
     SHORTCUT("TYPE_CLOSE_ACTIVE_PIN_WINDOW"      ,   "Ctrl+Q"                ),
 };
 // clang-format on
@@ -253,6 +274,25 @@ ConfigHandler::ConfigHandler()
                                  m_errorCheckPending = true;
                              }
                          });
+
+#if defined(Q_OS_WIN)
+        // One-time migration. Builds before this one stored the main capture
+        // chord under CAPTURE_PRTSC (it used to be Print Screen) and never had
+        // a TAKE_SCREENSHOT value on Windows. Move the value the user chose to
+        // the canonical key, so the settings dialog lists one live capture row
+        // instead of an editable stale duplicate.
+        const QString legacyCapture =
+          QStringLiteral("Shortcuts/CAPTURE_PRTSC");
+        const QString captureShortcut =
+          QStringLiteral("Shortcuts/TAKE_SCREENSHOT");
+        if (m_settings.contains(legacyCapture) &&
+            !m_settings.contains(captureShortcut)) {
+            m_settings.setValue(captureShortcut,
+                                m_settings.value(legacyCapture));
+            m_settings.remove(legacyCapture);
+            m_settings.sync();
+        }
+#endif
     }
     firstInitialization = false;
 }
@@ -339,9 +379,7 @@ void ConfigHandler::setStartupLaunch(const bool start)
       "Paths",
       QSettings::NativeFormat);
     if (start) {
-        QString app_path =
-          QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
-        bootUpSettings.setValue("Flameshot", app_path);
+        bootUpSettings.setValue("Flameshot", windowsLaunchCommand());
 
         // set application workdir
         bootUpPath.beginGroup("flameshot.exe");
@@ -475,6 +513,12 @@ bool ConfigHandler::setShortcut(const QString& actionName,
     }
 done:
     m_settings.endGroup();
+    if (!errorFlag) {
+        // QSettings flushes on the next event-loop turn, and some builds use
+        // a portable ini outside what the watcher sees. Notify the global
+        // hotkey registrars right away so changes apply without a restart.
+        emit getInstance()->fileChanged();
+    }
     return !errorFlag;
 }
 

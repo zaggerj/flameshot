@@ -57,7 +57,21 @@ AbstractLogger& AbstractLogger::sendMessage(const QString& msg, Channel channel)
         }
     }
     if (m_targets & LogFile) {
-        // TODO
+        // Routed through the Qt message handler installed by CrashHandler, so
+        // daemon-side events (hotkeys, forwarded requests, capture failures)
+        // end up in %LOCALAPPDATA%\Flameshot\logs\flameshot.log instead of
+        // disappearing because a GUI process has no console attached.
+        switch (channel) {
+            case Info:
+                qInfo().noquote() << msg;
+                break;
+            case Warning:
+                qWarning().noquote() << msg;
+                break;
+            case Error:
+                qCritical().noquote() << msg;
+                break;
+        }
     }
     if (m_targets & Stderr) {
         QTextStream stream(stderr);

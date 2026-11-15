@@ -17,6 +17,7 @@
 #include "core/flameshotdaemon.h"
 #include "utils/abstractlogger.h"
 #include "utils/confighandler.h"
+#include "utils/crashhandler.h"
 #include "utils/filenamehandler.h"
 #include "utils/pathinfo.h"
 #include "utils/valuehandler.h"
@@ -25,6 +26,27 @@
 #include "core/flameshotdbusadapter.h"
 #include <QDBusConnection>
 #include <QDBusMessage>
+#endif
+
+#if defined(Q_OS_WIN)
+#include "utils/scrollcapture.h"
+#include <qt_windows.h>
+#include <tlhelp32.h>
+#endif
+
+#include <QDir>
+#include <QFile>
+#include <QTextStream>
+
+#ifdef ENABLE_SELFTEST
+#include "tools/capturecontext.h"
+#include "tools/circlecount/circlecounttool.h"
+#include "utils/scrollcapture.h"
+#include <QColor>
+#include <QImage>
+#include <QPainter>
+#include <QPixmap>
+#include <QTextStream>
 #endif
 
 #include <QApplication>
@@ -63,8 +85,87 @@ static int setup_unix_signal_handlers()
 }
 #endif
 
-int requestCaptureAndWait(const CaptureRequest& req)
+#if defined(Q_OS_WIN)
+/**
+ * @brief `flameshot doctor` - answer "is it running, and did it crash?".
+ *
+ * Reads public state only: the process list, the config, the tail of the log
+ * and the crash reports. It never scrolls, grabs pixels or takes focus, so it
+ * is safe to run while the desktop is in use - which is exactly when somebody
+ * needs to know why the tray icon is gone.
+ */
+int runDoctor()
 {
+    QTextStream out(stdout);
+
+    // 1. is a daemon/capture process alive?
+    QList<unsigned long> pids;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        if (Process32FirstW(snapshot, &entry)) {
+            do {
+                if (_wcsicmp(entry.szExeFile, L"flameshot.exe") == 0 &&
+                    entry.th32ProcessID != GetCurrentProcessId()) {
+                    pids << entry.th32ProcessID;
+                }
+            } while (Process32NextW(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+    }
+    out << "=== Flameshot 自检 ===\n";
+    out << "进程数: " << pids.size() << "\n";
+    for (unsigned long pid : pids) {
+        out << "  pid " << pid << "\n";
+    }
+
+    // 2. would the tray show up at all?
+    ConfigHandler config;
+    out << "配置: " << config.configFilePath() << "\n";
+    out << "  disabledTrayIcon   = "
+        << (config.disabledTrayIcon() ? "true" : "false") << "\n";
+    out << "  autoCloseIdleDaemon= "
+        << (config.autoCloseIdleDaemon() ? "true" : "false") << "\n";
+    out << "  TAKE_SCREENSHOT    = " << config.shortcut("TAKE_SCREENSHOT")
+        << "\n";
+    out << "  SCROLL_CAPTURE     = " << config.shortcut("SCROLL_CAPTURE")
+        << "\n";
+    out << "  TYPE_CIRCLECOUNT   = " << config.shortcut("TYPE_CIRCLECOUNT")
+        << "\n";
+
+    // 3. did it crash since the last time somebody asked?
+    const QString logDir = CrashHandler::logDirectory();
+    const QString crashDir = logDir + QStringLiteral("/crashes");
+    const QStringList crashes =
+      QDir(crashDir).entryList({ "crash-*", "abort-*" }, QDir::Files);
+    out << "日志: " << CrashHandler::logFilePath() << "\n";
+    out << "崩溃报告: " << crashes.size() << " 个";
+    if (crashes.isEmpty()) {
+        out << "（没有崩溃记录，说明进程是正常退出或被结束，不是崩溃）";
+    }
+    out << "\n";
+    for (const QString& name : crashes) {
+        out << "  " << crashDir << "/" << name << "\n";
+    }
+
+    // 4. what happened last?
+    QFile log(CrashHandler::logFilePath());
+    if (log.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QStringList lines = QString::fromUtf8(log.readAll())
+                                    .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        const int from = qMax(0, lines.size() - 12);
+        out << "--- 日志最后 " << (lines.size() - from) << " 行 ---\n";
+        for (int i = from; i < lines.size(); ++i) {
+            out << lines.at(i) << "\n";
+        }
+    }
+    out.flush();
+    return 0;
+}
+#endif
+
+int requestCaptureAndWait(const CaptureRequest& req){
     Flameshot* flameshot = Flameshot::instance();
     flameshot->requestCapture(req);
     QObject::connect(flameshot, &Flameshot::captureTaken, [&](const QPixmap&) {
@@ -89,10 +190,13 @@ int requestCaptureAndWait(const CaptureRequest& req)
         AbstractLogger::info(logTarget) << "Screenshot aborted.";
         qApp->exit(E_ABORTED);
     });
-    return qApp->exec();
-}
-
-QSharedMemory* guiMutexLock()
+    const int exitCode = qApp->exec();
+    AbstractLogger::info(AbstractLogger::LogFile)
+      << QStringLiteral("process exit: pid=%1 code=%2 (capture)")
+           .arg(QCoreApplication::applicationPid())
+           .arg(exitCode);
+    return exitCode;
+}QSharedMemory* guiMutexLock()
 {
     QString key = "org.flameshot.Flameshot-" APP_VERSION;
     auto* shm = new QSharedMemory(key);
@@ -200,17 +304,264 @@ void configureApp(bool gui, QTranslator& translator, QTranslator& qtTranslator)
     configureTranslation(translator, qtTranslator);
 }
 
-// TODO find a way so we don't have to do this
-/// Recreate the application as a QApplication
-void reinitializeAsQApplication(int& argc,
-                                char* argv[],
-                                QTranslator& translator,
-                                QTranslator& qtTranslator)
+#if defined(USE_KDSINGLEAPPLICATION)
+namespace {
+
+/**
+ * @brief One flameshot per desktop session.
+ *
+ * Before this, only the "no arguments" path created a KDSingleApplication
+ * object. `flameshot daemon` (the autostart entry) did not, so the daemon was
+ * invisible to that check: every later launch became "primary" and started a
+ * second daemon with a second tray icon. A few launches produced the pile of
+ * tray icons users reported, and the duplicates kept a grab on the hotkeys.
+ *
+ * Now every long lived mode goes through this door. The first process stays
+ * the single owner of the tray and the hotkeys; the others hand their verb
+ * over to it and exit.
+ */
+KDSingleApplication* g_singleInstance = nullptr;
+
+bool claimSingleInstance(const QString& verb)
 {
-    delete QCoreApplication::instance();
-    new QApplication(argc, argv);
-    configureApp(true, translator, qtTranslator);
+    if (g_singleInstance == nullptr) {
+        g_singleInstance =
+          new KDSingleApplication(QStringLiteral("org.flameshot.Flameshot"));
+    }
+    if (g_singleInstance->isPrimaryInstance()) {
+        return true;
+    }
+#if defined(Q_OS_WIN)
+    // Tell the log *who* owns the tray, so "the tray disappeared / there are
+    // several of them" reports have a primary source of truth.
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        if (Process32FirstW(snapshot, &entry)) {
+            do {
+                if (_wcsicmp(entry.szExeFile, L"flameshot.exe") == 0 &&
+                    entry.th32ProcessID != GetCurrentProcessId()) {
+                    AbstractLogger::info(AbstractLogger::LogFile)
+                      << QStringLiteral(
+                           "another flameshot instance is alive (pid=%1), "
+                           "forwarding verb '%2' and exiting")
+                           .arg(entry.th32ProcessID)
+                           .arg(verb);
+                    break;
+                }
+            } while (Process32NextW(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+    }
+#endif
+    // Empty verb means "just make sure no second tray appears".
+    if (!verb.isEmpty()) {
+        g_singleInstance->sendMessage(verb.toUtf8());
+    }
+    return false;
 }
+
+} // namespace
+#endif
+
+/**
+ * @brief Route verbs forwarded by a second process into the primary one.
+ *
+ * Runs in the primary process only. A forwarded verb never starts a second
+ * copy of the UI: it reuses the overlay that is already on screen instead.
+ */
+void dispatchForwardedRequest(const QByteArray& raw);
+
+// The single-instance channel carries two different kinds of traffic: plain
+// verbs from a second invocation of our own command line ("capture",
+// "config", ...) and QDataStream payloads from the pin/clipboard helpers.
+// Route them by shape once, so the daemon handler stops warning about verbs
+// it was never meant to understand.
+bool isForwardedVerb(const QByteArray& message)
+{
+    return message == QByteArrayLiteral("capture") ||
+           message == QByteArrayLiteral("scroll") ||
+           message == QByteArrayLiteral("config") ||
+           message == QByteArrayLiteral("launcher") ||
+           message == QByteArrayLiteral("quit") ||
+           message == QByteArrayLiteral("daemon");
+}
+
+void routeMessage(const QByteArray& message)
+{
+    if (isForwardedVerb(message)) {
+        dispatchForwardedRequest(message);
+        return;
+    }
+    if (FlameshotDaemon::instance() != nullptr) {
+        FlameshotDaemon::instance()->messageReceivedFromSecondaryInstance(
+          message);
+    }
+}
+
+void dispatchForwardedRequest(const QByteArray& raw)
+{
+    const QString verb = QString::fromUtf8(raw);
+    AbstractLogger::info() << QStringLiteral(
+                                "Second instance forwarded '%1'")
+                                .arg(verb);
+
+    if (verb == QLatin1String("capture")) {
+        Flameshot* flameshot = Flameshot::instance();
+        if (flameshot->hasCaptureWindow()) {
+            flameshot->raiseCaptureWindow();
+            return;
+        }
+        flameshot->requestCapture(
+          CaptureRequest(CaptureRequest::GRAPHICAL_MODE));
+    } else if (verb == QLatin1String("scroll")) {
+#if defined(Q_OS_WIN)
+        ScrollCapture::instance()->start();
+#endif
+    } else if (verb == QLatin1String("config")) {
+        Flameshot::instance()->config();
+    } else if (verb == QLatin1String("launcher")) {
+        Flameshot::instance()->launcher();
+    } else if (verb == QLatin1String("quit")) {
+        // Graceful shutdown. A killed daemon leaves its notification icon
+        // behind as a dead entry that Explorer keeps showing until the user
+        // hovers it; the installer used to TerminateProcess every upgrade, so
+        // each update added one more ghost icon ("托盘有六个"). Hiding the
+        // tray icon first sends NIM_DELETE and the shell forgets it.
+        AbstractLogger::info(AbstractLogger::LogFile)
+          << QStringLiteral("Graceful shutdown requested by a second instance");
+        if (FlameshotDaemon::instance() != nullptr) {
+            FlameshotDaemon::instance()->shutdownForExit();
+        } else {
+            QTimer::singleShot(0, qApp, []() { QCoreApplication::quit(); });
+        }
+    } else if (verb == QLatin1String("daemon")) {
+        // Autostart raced with an already running instance. Never answer with
+        // silence: a user double-clicking the shortcut must get visible
+        // feedback, otherwise "nothing happens" reads as "the app is broken".
+        if (FlameshotDaemon::instance() != nullptr) {
+            FlameshotDaemon::instance()->sendTrayNotification(
+              QStringLiteral("按 Ctrl+Alt+A 截图，Ctrl+Alt+S 滚动截图"),
+              QStringLiteral("Flameshot 已在运行"));
+        }
+    } else {
+        AbstractLogger::warning(AbstractLogger::LogFile)
+          << QStringLiteral("Unknown forwarded request: %1").arg(verb);
+    }
+}
+
+#ifdef ENABLE_SELFTEST
+// Acceptance harness: render markers with the *production* CircleCountTool
+// and measure the resulting pixels. Not a mock and not a formula replay.
+static int runRenderSelfTest(const QString& outputDir)
+{
+    QDir().mkpath(outputDir);
+    QTextStream out(stdout);
+
+    for (int toolSize : { 1, 4, 5, 15, 50 }) {
+        QPixmap pixmap(240, 240);
+        pixmap.fill(Qt::white);
+
+        CaptureContext ctx;
+        ctx.color = QColor(255, 0, 0);
+        ctx.mousePos = QPoint(120, 120);
+        ctx.toolSize = toolSize;
+        ctx.circleCount = 1;
+
+        CircleCountTool tool;
+        tool.drawStart(ctx);
+        QPainter painter(&pixmap);
+        tool.process(painter, pixmap);
+        painter.end();
+
+        const QString file = QDir(outputDir).filePath(
+          QStringLiteral("marker-%1.png").arg(toolSize));
+        const bool saved = pixmap.save(file, "PNG");
+
+        const QImage img =
+          pixmap.toImage().convertToFormat(QImage::Format_RGB32);
+        int minX = img.width(), minY = img.height(), maxX = -1, maxY = -1;
+        bool contrastPixels = false;
+        for (int y = 0; y < img.height(); ++y) {
+            const auto* row =
+              reinterpret_cast<const QRgb*>(img.constScanLine(y));
+            for (int x = 0; x < img.width(); ++x) {
+                const QRgb p = row[x];
+                // Ignore near-white background and antialiasing fringe.
+                if (qRed(p) > 215 && qGreen(p) > 215 && qBlue(p) > 215) {
+                    continue;
+                }
+                minX = qMin(minX, x);
+                minY = qMin(minY, y);
+                maxX = qMax(maxX, x);
+                maxY = qMax(maxY, y);
+                // Anything not the marker colour is a digit / outline.
+                if (!(qRed(p) > 180 && qGreen(p) < 80 && qBlue(p) < 80)) {
+                    contrastPixels = true;
+                }
+            }
+        }
+
+        out << "size=" << toolSize << " bbox="
+            << (maxX - minX + 1) << "x" << (maxY - minY + 1)
+            << " digit_or_outline=" << (contrastPixels ? "yes" : "no")
+            << " png=" << file << " saved=" << (saved ? "yes" : "no")
+            << "\n";
+        if (toolSize == 1) {
+            for (int y = 115; y <= 124; ++y) {
+                QString line;
+                for (int x = 115; x <= 124; ++x) {
+                    const QRgb p = img.pixel(x, y);
+                    const int diff = 255 - qMin(qRed(p), qGreen(p));
+                    line += diff > 128 ? '#' : (diff > 8 ? '+' : '.');
+                }
+                out << "    " << line << "\n";
+            }
+        }
+    }
+    // Wheel semantics of the counter tool, exercised on the production class:
+    // a plain wheel is not consumed so CaptureWidget::setToolSize() resizes the
+    // bubble; Ctrl+wheel consumes it and steps the next number instead.
+    {
+        CaptureContext plainCtx;
+        plainCtx.circleCount = 7;
+        CircleCountTool plainTool;
+        const bool plainConsumed =
+          plainTool.handleMouseWheelEvent(1, false, plainCtx);
+
+        CaptureContext ctrlCtx;
+        ctrlCtx.circleCount = 7;
+        CircleCountTool ctrlTool;
+        const bool ctrlConsumed =
+          ctrlTool.handleMouseWheelEvent(1, true, ctrlCtx);
+
+        out << "wheel plain consumed=" << (plainConsumed ? "yes" : "no")
+            << " (expect no -> resizes marker)"
+            << " ctrl consumed=" << (ctrlConsumed ? "yes" : "no")
+            << " (expect yes -> number 7->" << ctrlCtx.circleCount << ")\n";
+    }
+
+    // ScrollRegionPicker selftest: synthetic background, keyboard-driven
+    // move / zoom / confirm / cancel on an off-screen widget. No real
+    // desktop pixels are touched.
+#if defined(Q_OS_WIN)
+    {
+        QString pickerReport;
+        const bool pickerOk = ScrollCapture::pickerSelfTest(pickerReport);
+        out << "picker " << (pickerOk ? "PASS" : "FAIL") << " "
+            << pickerReport << "\n";
+        if (!pickerOk) {
+            out.flush();
+            return 1;
+        }
+    }
+#endif
+
+    out.flush();
+    return 0;
+}
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -225,37 +576,51 @@ int main(int argc, char* argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("flameshot"));
     QNetworkProxyFactory::setUseSystemConfiguration(true);
 
+    // One QApplication for the whole process. The previous code created a
+    // QCoreApplication and then deleted it to build a QApplication in place
+    // ("reinitializeAsQApplication"). Tearing the application object down
+    // while Qt's platform integration, screen list and static caches still
+    // reference it is undefined behaviour, and it left the process without a
+    // platform plugin whenever a widget was constructed a moment too early.
+    QApplication app(argc, argv);
+    configureApp(true, translator, qtTranslator);
+    CrashHandler::install();
+
+    // One line per launch in the rolling log. Together with the matching
+    // "process exit" line it answers the only question that matters when the
+    // tray icon is gone: did the process stop on its own, and with which verb?
+    AbstractLogger::info(AbstractLogger::LogFile)
+      << QStringLiteral("process start: pid=%1 verb=%2 args=%3")
+           .arg(QCoreApplication::applicationPid())
+           .arg(argc > 1 ? QString::fromLocal8Bit(argv[1])
+                         : QStringLiteral("(none)"))
+           .arg(QCoreApplication::arguments().mid(1).join(QLatin1Char(' ')));
+
     // no arguments, just launch Flameshot
     if (argc == 1) {
-        QApplication app(argc, argv);
-        configureTranslation(translator, qtTranslator);
-
 #ifdef USE_KDSINGLEAPPLICATION
 #ifdef Q_OS_UNIX
         setup_unix_signal_handlers();
         auto signalDaemon = SignalDaemon();
 #endif
-        auto kdsa =
-          KDSingleApplication(QStringLiteral("org.flameshot.Flameshot"));
-
-        if (!kdsa.isPrimaryInstance() &&
+        // A second launch must not add a second tray icon; it asks the
+        // running instance for a capture instead.
+        if (!claimSingleInstance(QStringLiteral("capture")) &&
             !ConfigHandler().allowMultipleGuiInstances()) {
-            return 0; // Quit
+            return 0;
         }
 #endif
 
-        configureApp(true, translator, qtTranslator);
         auto c = Flameshot::instance();
         FlameshotDaemon::start();
 
-#if defined(USE_KDSINGLEAPPLICATION) &&                                        \
-  (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
-        if (kdsa.isPrimaryInstance()) {
+#if defined(USE_KDSINGLEAPPLICATION)
+        if (g_singleInstance != nullptr &&
+            g_singleInstance->isPrimaryInstance()) {
             QObject::connect(
-              &kdsa,
+              g_singleInstance,
               &KDSingleApplication::messageReceived,
-              FlameshotDaemon::instance(),
-              &FlameshotDaemon::messageReceivedFromSecondaryInstance);
+              [](const QByteArray& message) { routeMessage(message); });
         }
 #endif
 
@@ -269,15 +634,17 @@ int main(int argc, char* argv[])
         dbus.registerObject(QStringLiteral("/"), c);
         dbus.registerService(QStringLiteral("org.flameshot.Flameshot"));
 #endif
-        return qApp->exec();
+        const int exitCode = qApp->exec();
+        AbstractLogger::info(AbstractLogger::LogFile)
+          << QStringLiteral("process exit: pid=%1 code=%2 (no arguments)")
+               .arg(QCoreApplication::applicationPid())
+               .arg(exitCode);
+        return exitCode;
     }
 
     /*--------------|
      * CLI parsing  |
      * ------------*/
-    new QCoreApplication(argc, argv);
-    configureApp(false, translator, qtTranslator);
-
     CommandLineParser parser;
     // Add description
     parser.setDescription(
@@ -289,6 +656,14 @@ int main(int argc, char* argv[])
       QObject::tr("Capture screenshot of all monitors at the same time."));
     CommandArgument launcherArgument(QStringLiteral("launcher"),
                                      QObject::tr("Open the capture launcher."));
+    CommandArgument daemonArgument(
+      QStringLiteral("daemon"),
+      QObject::tr("Run in the background: tray icon and global hotkeys only."));
+    CommandArgument quitArgument(
+      QStringLiteral("quit"),
+      QObject::tr("Ask the running instance to shut down and remove its tray "
+                  "icon. Never force-kill the daemon: a killed process leaves "
+                  "a dead tray icon behind."));
     CommandArgument guiArgument(
       QStringLiteral("gui"),
       QObject::tr("Start a manual capture in GUI mode."));
@@ -297,12 +672,32 @@ int main(int argc, char* argv[])
     CommandArgument screenArgument(
       QStringLiteral("screen"),
       QObject::tr("Capture a screenshot of the specified monitor."));
+#ifdef Q_OS_WIN
+    CommandArgument scrollArgument(
+      QStringLiteral("scroll"),
+      QObject::tr("Capture a scrolling screenshot of a selected region."));
+    CommandArgument doctorArgument(
+      QStringLiteral("doctor"),
+      QObject::tr("Report processes, tray configuration, crash reports and the "
+                  "tail of the log. Read only."));
+#endif
+#ifdef ENABLE_SELFTEST
+    CommandArgument selftestArgument(
+      QStringLiteral("selftest"),
+      QObject::tr("Render annotation markers and measure their pixels."));
+#endif
 
     // Options
     CommandOption pathOption(
       { "p", "path" },
       QObject::tr("Existing directory or new file to save to"),
       QStringLiteral("path"));
+#ifdef Q_OS_WIN
+    CommandOption probeOption(
+      QStringLiteral("probe"),
+      QObject::tr("Only report which window and scroll container would be "
+                  "used, without scrolling anything."));
+#endif
     CommandOption clipboardOption(
       { "c", "clipboard" }, QObject::tr("Save the capture to the clipboard"));
     CommandOption pinOption("pin",
@@ -431,9 +826,24 @@ int main(int argc, char* argv[])
     parser.AddArgument(screenArgument);
     parser.AddArgument(fullArgument);
     parser.AddArgument(launcherArgument);
+    parser.AddArgument(daemonArgument);
+    parser.AddArgument(quitArgument);
     parser.AddArgument(configArgument);
+#ifdef Q_OS_WIN
+    parser.AddArgument(scrollArgument);
+    parser.AddArgument(doctorArgument);
+#endif
+#ifdef ENABLE_SELFTEST
+    parser.AddArgument(selftestArgument);
+#endif
     auto helpOption = parser.addHelpOption();
     auto versionOption = parser.addVersionOption();
+#ifdef ENABLE_SELFTEST
+    parser.AddOptions({ pathOption }, selftestArgument);
+#endif
+#ifdef Q_OS_WIN
+    parser.AddOptions({ probeOption }, scrollArgument);
+#endif
     parser.AddOptions({ pathOption,
                         clipboardOption,
                         delayOption,
@@ -473,14 +883,73 @@ int main(int argc, char* argv[])
     // PROCESS DATA
     //--------------
     Flameshot::setOrigin(Flameshot::CLI);
+#ifdef ENABLE_SELFTEST
+    if (parser.isSet(selftestArgument)) {
+        QString dir = parser.value(pathOption);
+        if (dir.isEmpty()) {
+            dir = QDir::currentPath();
+        }
+        runRenderSelfTest(dir);
+        goto finish;
+    }
+#endif
+#ifdef Q_OS_WIN
+    if (parser.isSet(doctorArgument)) {
+        runDoctor();
+        goto finish;
+    }
+    if (parser.isSet(scrollArgument)) {
+        if (parser.isSet(probeOption)) {
+            ScrollCapture::diagnose();
+        } else {
+            ScrollCapture::instance()->start();
+        }
+        goto finish;
+    }
+#endif
     if (parser.isSet(helpOption) || parser.isSet(versionOption)) {
+    } else if (parser.isSet(quitArgument)) { // QUIT
+        // "flameshot quit" is the sanctioned way to stop the daemon: it asks
+        // the running instance to hide its tray icon (NIM_DELETE) and exit,
+        // so no dead icon is left in the notification area.
+#if defined(USE_KDSINGLEAPPLICATION)
+        if (!claimSingleInstance(QStringLiteral("quit"))) {
+            // Verb forwarded to the primary instance; it will shut down.
+            return 0;
+        }
+#endif
+        AbstractLogger::info(AbstractLogger::LogFile)
+          << QStringLiteral("No running instance to stop");
+        return 0;
+    } else if (parser.isSet(daemonArgument)) { // DAEMON
+        // Tray icon plus global hotkeys, nothing on screen. This is what the
+        // autostart entry uses: `launcher` would flash a window on every boot.
+#if defined(USE_KDSINGLEAPPLICATION)
+        if (!claimSingleInstance(QStringLiteral("daemon"))) {
+            return 0;
+        }
+        QObject::connect(g_singleInstance,
+                         &KDSingleApplication::messageReceived,
+                         [](const QByteArray& message) {
+                             routeMessage(message);
+                         });
+#endif
+        Flameshot::instance();
+        FlameshotDaemon::start();
+        if (FlameshotDaemon::instance() == nullptr) {
+            return 1;
+        }
+        qApp->exec();
     } else if (parser.isSet(launcherArgument)) { // LAUNCHER
-        reinitializeAsQApplication(argc, argv, translator, qtTranslator);
+#if defined(USE_KDSINGLEAPPLICATION)
+        if (!claimSingleInstance(QStringLiteral("launcher"))) {
+            return 0;
+        }
+#endif
         Flameshot* flameshot = Flameshot::instance();
         flameshot->launcher();
         qApp->exec();
     } else if (parser.isSet(guiArgument)) { // GUI
-        reinitializeAsQApplication(argc, argv, translator, qtTranslator);
 
         // Prevent multiple instances of 'flameshot gui' from running if not
         // configured to do so.
@@ -539,10 +1008,8 @@ int main(int argc, char* argv[])
             }
         }
         int guiExitCode = requestCaptureAndWait(req);
-        delete qApp;
         return guiExitCode;
     } else if (parser.isSet(fullArgument)) { // FULL
-        reinitializeAsQApplication(argc, argv, translator, qtTranslator);
 
         // Option values
         QString path = parser.value(pathOption);
@@ -568,11 +1035,9 @@ int main(int argc, char* argv[])
         }
         {
             int fullExitCode = requestCaptureAndWait(req);
-            delete qApp;
             return fullExitCode;
         }
     } else if (parser.isSet(screenArgument)) { // SCREEN
-        reinitializeAsQApplication(argc, argv, translator, qtTranslator);
 
         QString numberStr = parser.value(screenNumberOption);
         // Option values
@@ -626,7 +1091,6 @@ int main(int argc, char* argv[])
 
         {
             int screenExitCode = requestCaptureAndWait(req);
-            delete qApp;
             return screenExitCode;
         }
     } else if (parser.isSet(configArgument)) { // CONFIG
@@ -652,7 +1116,11 @@ int main(int argc, char* argv[])
         }
         if (!someFlagSet) {
             // Open gui when no options are given
-            reinitializeAsQApplication(argc, argv, translator, qtTranslator);
+#if defined(USE_KDSINGLEAPPLICATION)
+            if (!claimSingleInstance(QStringLiteral("config"))) {
+                return 0;
+            }
+#endif
             QObject::connect(
               qApp, &QApplication::lastWindowClosed, qApp, &QApplication::quit);
             Flameshot::instance()->config();
@@ -694,6 +1162,11 @@ int main(int argc, char* argv[])
         }
     }
 finish:
-    delete qApp;
+    AbstractLogger::info(AbstractLogger::LogFile)
+      << QStringLiteral("process exit: pid=%1 code=0 (command line)")
+           .arg(QCoreApplication::applicationPid());
+    // The QApplication is intentionally left alive: the process is ending and
+    // deleting it here used to run the static singletons (Flameshot, the
+    // daemon, QHotkey) against a dead application object.
     return 0;
 }

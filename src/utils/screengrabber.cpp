@@ -331,6 +331,37 @@ QPixmap ScreenGrabber::grabEntireDesktop(bool& ok, int preSelectedMonitor)
         return QPixmap();
     }
 #elif defined(Q_OS_WIN)
+    // Grab the target monitor on its own. The old path composited every screen
+    // into one canvas and then cropped, reconstructing the physical offset of
+    // each monitor from its logical geometry. That reconstruction is only
+    // correct for a single horizontal row of identically scaled monitors: with
+    // a stacked layout (or mixed DPI) it produced images from the wrong screen
+    // or shifted by a few pixels, which is exactly what the dual monitor
+    // reports described.
+    {
+        const QList<QScreen*> screens = QGuiApplication::screens();
+        if (preSelectedMonitor < 0 && ConfigHandler().captureActiveMonitor()) {
+            QGuiAppCurrentScreen screenFinder;
+            QScreen* cursorScreen = screenFinder.currentScreen();
+            const int index = screens.indexOf(cursorScreen);
+            if (index >= 0) {
+                preSelectedMonitor = index;
+            }
+        }
+        if (preSelectedMonitor >= 0 && preSelectedMonitor < screens.size()) {
+            QScreen* target = screens[preSelectedMonitor];
+            QPixmap shot = target->grabWindow(wid);
+            if (shot.isNull()) {
+                AbstractLogger::error()
+                  << tr("Unable to capture the selected monitor");
+                ok = false;
+                return QPixmap();
+            }
+            shot.setDevicePixelRatio(target->devicePixelRatio());
+            m_selectedMonitor = preSelectedMonitor;
+            return shot;
+        }
+    }
     screenshot = windowsScreenshot(wid);
 #endif
 
@@ -402,6 +433,18 @@ QPixmap ScreenGrabber::grabScreen(QScreen* screen, bool& ok)
     int screenIndex = screens.indexOf(screen);
 
     p = grabEntireDesktop(ok, screenIndex);
+#elif defined(Q_OS_WIN)
+    // Same reasoning as grabEntireDesktop: no virtual-desktop coordinates,
+    // no cropping - ask the screen for its own pixels.
+    Q_UNUSED(geometry)
+    ok = true;
+    QPixmap captured = screen->grabWindow(0);
+    if (captured.isNull()) {
+        ok = false;
+        return captured;
+    }
+    captured.setDevicePixelRatio(screen->devicePixelRatio());
+    return captured;
 #else
     ok = true;
     return screen->grabWindow(

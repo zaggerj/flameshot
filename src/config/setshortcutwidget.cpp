@@ -44,17 +44,9 @@ SetShortcutDialog::SetShortcutDialog(QDialog* parent,
       tr("Press Esc to cancel or Backspace to disable the keyboard shortcut.");
 #endif
 
-    auto restartMessageAdded = false;
-    if (shortcutName == "TAKE_SCREENSHOT" && restartMessageAdded == false) {
-        msg +=
-          "\n" + tr("Flameshot must be restarted for changes to take effect.");
-        restartMessageAdded = true;
-    }
-    if (shortcutName == "SCREENSHOT_HISTORY" && restartMessageAdded == false) {
-        msg +=
-          "\n" + tr("Flameshot must be restarted for changes to take effect.");
-        restartMessageAdded = true;
-    }
+    Q_UNUSED(shortcutName)
+    // Shortcuts are re-read / re-registered on change, no restart needed.
+    msg += "\n" + tr("Changes apply immediately.");
 
     auto* infoBottom = new QLabel(msg);
     infoBottom->setMargin(10);

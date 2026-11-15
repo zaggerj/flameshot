@@ -2,6 +2,7 @@
 target_sources(
   flameshot
   PRIVATE abstractlogger.h
+          crashhandler.h
           filenamehandler.h
           screengrabber.h
           systemnotification.h
@@ -12,6 +13,7 @@ target_sources(
 target_sources(
   flameshot
   PRIVATE abstractlogger.cpp
+          crashhandler.cpp
           filenamehandler.cpp
           screengrabber.cpp
           monitorpreview.cpp
@@ -39,6 +41,10 @@ ENDIF()
 IF (WIN32)
   target_sources(
     flameshot
-    PRIVATE winlnkfileparse.cpp
+    PRIVATE scrollcapture.h
+            scrollcapture.cpp
+            scrolluia.h
+            scrolluia.cpp
+            winlnkfileparse.cpp
   )
 ENDIF()

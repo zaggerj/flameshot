@@ -30,6 +30,7 @@ private:
     QMenu* m_menu;
     QMenu* m_screenMenu;
     QAction* m_captureAction;
+    QAction* m_scrollCaptureAction;
     QAction* m_launcherAction;
     QAction* m_infoAction;
 #if !defined(DISABLE_UPDATE_CHECKER)

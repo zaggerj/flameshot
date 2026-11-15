@@ -7,12 +7,38 @@
 
 #include <QPainter>
 #include <QPainterPath>
+#include <algorithm>
 
 namespace {
-#define PADDING_VALUE 2
-#define THICKNESS_OFFSET 15
+// Outline ring grows the bubble by PADDING_VALUE pixels in diameter.
+constexpr int PADDING_VALUE = 2;
+// Tool sizes 1..50 map to a bubble *diameter*. The floor is 18 px: at 5 px the
+// digit was a single unreadable smudge, so "size 1" looked broken rather than
+// small. 18 px keeps a two digit number legible on a 1080p screen and stays
+// inside the smallest useful annotation.
+//   size  1 -> 18 px      size  5 -> 24 px
+//   size 15 -> 40 px     size 50 -> 97 px
+constexpr int MIN_BUBBLE_DIAMETER = 18;
+constexpr int DIAMETER_STEP_NUMERATOR = 8;
+constexpr int DIAMETER_STEP_DENOMINATOR = 5;
+// Below this diameter the digit is unreadable; draw a plain dot instead. With
+// the floor above this only matters for future smaller mappings.
+constexpr int NUMBER_MIN_DIAMETER = 14;
 int const MIN_COUNTER = 1;
 int const MAX_COUNTER = 999;
+
+int bubbleDiameter(int toolSize)
+{
+    const int step = std::max(1, toolSize) - 1;
+    return MIN_BUBBLE_DIAMETER +
+           step * DIAMETER_STEP_NUMERATOR / DIAMETER_STEP_DENOMINATOR;
+}
+
+// Ceil of the radius, used for integer bounding rectangles.
+int bubbleExtent(int toolSize)
+{
+    return (bubbleDiameter(toolSize) + 1) / 2;
+}
 }
 
 CircleCountTool::CircleCountTool(QObject* parent)
@@ -39,8 +65,8 @@ bool CircleCountTool::isValid() const
 
 QRect CircleCountTool::mousePreviewRect(const CaptureContext& context) const
 {
-    int width = (context.toolSize + THICKNESS_OFFSET) * 2;
-    QRect rect(0, 0, width, width);
+    const int extent = bubbleDiameter(context.toolSize) + PADDING_VALUE * 2;
+    QRect rect(0, 0, extent, extent);
     rect.moveCenter(context.mousePos);
     return rect;
 }
@@ -50,16 +76,18 @@ QRect CircleCountTool::boundingRect() const
     if (!isValid()) {
         return {};
     }
-    int bubble_size = size() + THICKNESS_OFFSET + PADDING_VALUE;
+    // Radius plus the outline ring. Must stay in sync with process(),
+    // otherwise partial redraws leave artefacts behind.
+    const int extent = bubbleExtent(size()) + PADDING_VALUE;
 
     int line_pos_min_x =
-      std::min(points().first.x() - bubble_size, points().second.x());
+      std::min(points().first.x() - extent, points().second.x());
     int line_pos_min_y =
-      std::min(points().first.y() - bubble_size, points().second.y());
+      std::min(points().first.y() - extent, points().second.y());
     int line_pos_max_x =
-      std::max(points().first.x() + bubble_size, points().second.x());
+      std::max(points().first.x() + extent, points().second.x());
     int line_pos_max_y =
-      std::max(points().first.y() + bubble_size, points().second.y());
+      std::max(points().first.y() + extent, points().second.y());
 
     return { line_pos_min_x,
              line_pos_min_y,
@@ -110,71 +138,87 @@ void CircleCountTool::process(QPainter& painter, const QPixmap& pixmap)
     QColor antiContrastColor =
       ColorUtils::colorIsDark(color()) ? Qt::black : Qt::white;
 
-    int bubble_size = size() + THICKNESS_OFFSET;
+    const int diameter = bubbleDiameter(size());
+    const qreal radius = diameter / 2.0;
+    const QPointF center(points().first);
+    // QPainter::drawEllipse(center, r, r) rasterises half-open boundaries,
+    // which yields 4x4 px for a nominal 5 px circle. An integer-aligned rect
+    // gives exactly `diameter` pixels and keeps tiny markers predictable.
+    const int half = diameter / 2;
+    const QRect bubbleRect(qRound(center.x()) - half,
+                           qRound(center.y()) - half,
+                           diameter,
+                           diameter);
+    // Qt's ellipse rasteriser uses a half-open bottom/right edge, so a
+    // d x d rect yields only d-1 rows/cols. Extending by one pixel restores
+    // the exact `diameter` x `diameter` footprint.
+    const QRectF bubbleShape =
+      diameter < NUMBER_MIN_DIAMETER
+        ? QRectF(bubbleRect).adjusted(0, 0, 0, 1)
+        : QRectF(bubbleRect).adjusted(0, 0, 1, 1);
 
-    QLineF line(points().first, points().second);
-    // if the mouse is outside of the bubble, draw the pointer
-    if (line.length() > bubble_size) {
+    QLineF line(center, QPointF(points().second));
+    // Pointer: only when the second point lies outside the bubble.
+    if (line.length() > radius) {
         painter.setPen(QPen(color(), 0));
         painter.setBrush(color());
 
-        int middleX = points().first.x();
-        int middleY = points().first.y();
-
         QLineF normal = line.normalVector();
-        normal.setLength(bubble_size);
+        normal.setLength(radius);
         QPoint p1 = normal.p2().toPoint();
-        QPoint p2(middleX - (p1.x() - middleX), middleY - (p1.y() - middleY));
+        QPoint p2(qRound(center.x() - (p1.x() - center.x())),
+                  qRound(center.y() - (p1.y() - center.y())));
 
         QPainterPath path;
-        path.moveTo(points().first);
+        path.moveTo(center);
         path.lineTo(p1);
         path.lineTo(points().second);
         path.lineTo(p2);
-        path.lineTo(points().first);
+        path.lineTo(center);
         painter.drawPath(path);
     }
 
-    if (ConfigHandler().drawCircleCounterOutline()) {
+    // The contrast ring exists to keep the digit readable. On tiny markers
+    // it would grow the footprint beyond the requested 5x5 px, so draw only
+    // the plain dot there.
+    const bool showNumber = diameter >= NUMBER_MIN_DIAMETER;
+    if (showNumber && ConfigHandler().drawCircleCounterOutline()) {
         painter.setPen(contrastColor);
         painter.setBrush(antiContrastColor);
-        painter.drawEllipse(points().first,
-                            bubble_size + PADDING_VALUE,
-                            bubble_size + PADDING_VALUE);
+        painter.drawEllipse(
+          bubbleShape.adjusted(-PADDING_VALUE / 2.0,
+                               -PADDING_VALUE / 2.0,
+                               PADDING_VALUE / 2.0,
+                               PADDING_VALUE / 2.0));
     } else {
         painter.setPen(Qt::NoPen);
     }
     painter.setBrush(color());
-    painter.drawEllipse(points().first, bubble_size, bubble_size);
-    QRect textRect = QRect(points().first.x() - bubble_size / 2,
-                           points().first.y() - bubble_size / 2,
-                           bubble_size,
-                           bubble_size);
-    auto new_font = orig_font;
-    auto fontSize = bubble_size;
-    new_font.setPixelSize(fontSize);
-    new_font.setBold(true);
-    painter.setFont(new_font);
+    painter.drawEllipse(bubbleShape);
 
-    // Draw bounding circle
-    QRect bRect =
-      painter.boundingRect(textRect, Qt::AlignCenter, QString::number(count()));
-
-    // Calculate font size
-    while (bRect.width() > textRect.width()) {
-        fontSize--;
-        if (fontSize == 0) {
-            break;
-        }
+    // A digit is illegible on tiny markers: draw a plain dot instead.
+    if (showNumber) {
+        QRect textRect = bubbleRect;
+        auto new_font = orig_font;
+        int fontSize = diameter;
         new_font.setPixelSize(fontSize);
+        new_font.setBold(true);
         painter.setFont(new_font);
-        bRect = painter.boundingRect(
+
+        QRect bRect = painter.boundingRect(
           textRect, Qt::AlignCenter, QString::number(count()));
+        while (bRect.width() > textRect.width() && fontSize > 1) {
+            --fontSize;
+            new_font.setPixelSize(fontSize);
+            painter.setFont(new_font);
+            bRect = painter.boundingRect(
+              textRect, Qt::AlignCenter, QString::number(count()));
+        }
+
+        painter.setPen(contrastColor);
+        painter.drawText(textRect, Qt::AlignCenter, QString::number(count()));
     }
 
-    // Draw text
-    painter.setPen(contrastColor);
-    painter.drawText(textRect, Qt::AlignCenter, QString::number(count()));
     // restore original font, brush, and pen
     painter.setFont(orig_font);
     painter.setBrush(orig_brush);
@@ -184,30 +228,33 @@ void CircleCountTool::process(QPainter& painter, const QPixmap& pixmap)
 void CircleCountTool::paintMousePreview(QPainter& painter,
                                         const CaptureContext& context)
 {
-    onSizeChanged(context.toolSize + PADDING_VALUE);
+    // drawStart() stores context.toolSize verbatim; do the same here so the
+    // preview matches the marker that will actually be committed.
+    onSizeChanged(context.toolSize);
 
-    // Thickness for pen is *2 to range from radius to diameter to match the
-    // ellipse draw function
-    auto const previewWidth = (size() + THICKNESS_OFFSET) * 2;
+    const int diameter = bubbleDiameter(size());
     painter.save();
     painter.setOpacity(0.35);
-    painter.setPen(
-      QPen(context.color, previewWidth, Qt::SolidLine, Qt::RoundCap));
+    // A round-capped one-pixel line with this pen width renders as a filled
+    // circle of `diameter` pixels.
+    painter.setPen(QPen(context.color, diameter, Qt::SolidLine, Qt::RoundCap));
     painter.drawLine(context.mousePos,
                      { context.mousePos.x() + 1, context.mousePos.y() + 1 });
 
-    auto font = painter.font();
-    font.setPixelSize(previewWidth / 2);
-    font.setBold(true);
-    painter.setFont(font);
+    if (diameter >= NUMBER_MIN_DIAMETER) {
+        auto font = painter.font();
+        font.setPixelSize(diameter / 2);
+        font.setBold(true);
+        painter.setFont(font);
 
-    painter.setPen(QPen("white"));
-    painter.drawText(QRect{ context.mousePos.x() - previewWidth / 2,
-                            context.mousePos.y() - previewWidth / 2,
-                            previewWidth,
-                            previewWidth },
-                     Qt::AlignCenter,
-                     QString::number(context.circleCount));
+        painter.setPen(QPen("white"));
+        painter.drawText(QRect{ context.mousePos.x() - diameter / 2,
+                                context.mousePos.y() - diameter / 2,
+                                diameter,
+                                diameter },
+                         Qt::AlignCenter,
+                         QString::number(context.circleCount));
+    }
 
     painter.restore();
 }
