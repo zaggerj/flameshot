@@ -6,6 +6,8 @@
 #include "utils/abstractlogger.h"
 #include "utils/confighandler.h"
 #include "utils/globalvalues.h"
+#include "utils/translationmanager.h"
+#include "utils/zaggertr.h"
 #if defined(Q_OS_WIN)
 #include "utils/scrollcapture.h"
 #endif
@@ -103,6 +105,11 @@ TrayIcon::TrayIcon(QObject* parent)
             &ConfigHandler::fileChanged,
             this,
             [this]() { updateCaptureActionShortcut(); });
+
+    connect(TranslationManager::instance(),
+            &TranslationManager::languageChanged,
+            this,
+            &TrayIcon::retranslateMenu);
 }
 
 TrayIcon::~TrayIcon()
@@ -121,7 +128,17 @@ void TrayIcon::initMenu()
 {
     m_menu = new QMenu();
 
-    m_captureAction = new QAction(tr("&Take Screenshot"), this);
+    // Remember the source text of every translated action. tr(source) with a
+    // runtime const char* is valid Qt; it lets retranslateMenu() re-run the
+    // lookup after a language switch without re-creating the QAction objects
+    // (which would duplicate the connected lambdas).
+    auto makeAction = [this](const char* source) {
+        auto* action = new QAction(tr(source), this);
+        m_trActions.append({ action, QByteArray(source) });
+        return action;
+    };
+
+    m_captureAction = makeAction("&Take Screenshot");
 
     updateCaptureActionShortcut();
 
@@ -148,7 +165,7 @@ void TrayIcon::initMenu()
     // "click the feature" never find it. Same 400ms grace so the menu closes
     // before the fullscreen overlay appears.
     m_scrollCaptureAction =
-      new QAction(QStringLiteral("滚动截图 (Scrolling Capture)"), this);
+      new QAction(ZAG_TR("Scrolling capture"), this);
     connect(m_scrollCaptureAction, &QAction::triggered, this, [this]() {
         QTimer::singleShot(400, this, []() {
             auto* capture = ScrollCapture::instance();
@@ -159,24 +176,24 @@ void TrayIcon::initMenu()
         });
     });
 #endif
-    m_launcherAction = new QAction(tr("&Open Launcher"), this);
+    m_launcherAction = makeAction("&Open Launcher");
     connect(m_launcherAction,
             &QAction::triggered,
             Flameshot::instance(),
             &Flameshot::launcher);
-    auto* configAction = new QAction(tr("&Configuration"), this);
+    auto* configAction = makeAction("&Configuration");
     connect(configAction,
             &QAction::triggered,
             Flameshot::instance(),
             &Flameshot::config);
-    m_infoAction = new QAction(tr("&About"), this);
+    m_infoAction = makeAction("&About");
     connect(m_infoAction,
             &QAction::triggered,
             Flameshot::instance(),
             &Flameshot::info);
 
 #if !defined(DISABLE_UPDATE_CHECKER)
-    m_appUpdates = new QAction(tr("Check for updates"), this);
+    m_appUpdates = makeAction("Check for updates");
     connect(m_appUpdates,
             &QAction::triggered,
             FlameshotDaemon::instance(),
@@ -202,18 +219,18 @@ void TrayIcon::initMenu()
     updateCheckUpdatesMenuVisibility();
 #endif
 
-    QAction* quitAction = new QAction(tr("&Quit"), this);
+    QAction* quitAction = makeAction("&Quit");
     connect(quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
 
 #ifdef ENABLE_IMGUR
     // recent screenshots
-    QAction* recentAction = new QAction(tr("&Latest Uploads"), this);
+    QAction* recentAction = makeAction("&Latest Uploads");
     connect(recentAction,
             &QAction::triggered,
             Flameshot::instance(),
             &Flameshot::history);
 #endif
-    auto* openSavePathAction = new QAction(tr("&Open Save Path"), this);
+    auto* openSavePathAction = makeAction("&Open Save Path");
     connect(openSavePathAction,
             &QAction::triggered,
             Flameshot::instance(),
@@ -238,6 +255,20 @@ void TrayIcon::initMenu()
     m_menu->addAction(m_infoAction);
     m_menu->addSeparator();
     m_menu->addAction(quitAction);
+}
+
+void TrayIcon::retranslateMenu()
+{
+    for (const auto& entry : m_trActions) {
+        if (entry.first) {
+            entry.first->setText(tr(entry.second.constData()));
+        }
+    }
+#if defined(Q_OS_WIN)
+    if (m_scrollCaptureAction) {
+        m_scrollCaptureAction->setText(ZAG_TR("Scrolling capture"));
+    }
+#endif
 }
 
 void TrayIcon::updateCaptureActionShortcut()

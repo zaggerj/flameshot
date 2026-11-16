@@ -7,8 +7,10 @@
 #include "tools/capturetool.h"
 #include "tools/toolfactory.h"
 #include "utils/globalvalues.h"
+#include "utils/zaggertr.h"
 
 #include <QCheckBox>
+#include <QCoreApplication>
 #include <QCursor>
 #include <QDir>
 #include <QHeaderView>
@@ -203,7 +205,7 @@ void ShortcutsWidget::loadShortcuts()
                    tr("Delete selected drawn object"));
     appendShortcut("TYPE_CANCEL", tr("Cancel current selection"));
     appendShortcut("TYPE_CLOSE_ACTIVE_PIN_WINDOW",
-                   tr("Close Active Pinned Window"));
+                   ZAG_TR("Close Active Pinned Window"));
     // non-editable shortcuts have an empty shortcut name
 
     m_shortcuts << (QStringList() << "" << QObject::tr("Quit capture")
@@ -218,21 +220,22 @@ void ShortcutsWidget::loadShortcuts()
 #elif defined(Q_OS_WIN)
     // All Windows global hotkeys are user configurable. An empty value
     // disables the binding entirely (set with Backspace in the dialog).
-    appendShortcut("TAKE_SCREENSHOT", tr("Capture screen (global)"));
+    appendShortcut("TAKE_SCREENSHOT", ZAG_TR("Capture screen (global)"));
     appendShortcut("CAPTURE_PRTSC",
-                   tr("Capture screen, secondary (global)"));
+                   ZAG_TR("Capture screen, secondary (global)"));
     appendShortcut("HISTORY_PRTSC",
-                   tr("Screenshot history / open save folder (global)"));
-    appendShortcut("SCROLL_CAPTURE", tr("Scrolling capture (global)"));
+                   ZAG_TR("Screenshot history / open save folder (global)"));
+    appendShortcut("SCROLL_CAPTURE", ZAG_TR("Scrolling capture (global)"));
 #else
     // TODO - Linux doesn't support global shortcuts for (XServer and Wayland),
     // possibly it will be solved in the QHotKey library later. So it is
     // disabled for now.
 #endif
     m_shortcuts << (QStringList()
-                    << "" << QObject::tr("Show color picker") << "Right Click");
+                    << "" << QObject::tr("Show color picker")
+                    << QCoreApplication::translate("CaptureWidget", "Right Click"));
     m_shortcuts << (QStringList() << "" << QObject::tr("Change the tool's size")
-                                  << "Mouse Wheel");
+                                  << QCoreApplication::translate("CaptureWidget", "Mouse Wheel"));
 }
 
 void ShortcutsWidget::appendShortcut(const QString& shortcutName,

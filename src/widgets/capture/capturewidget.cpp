@@ -18,6 +18,7 @@
 #include "utils/abstractlogger.h"
 #include "utils/screengrabber.h"
 #include "utils/screenshotsaver.h"
+#include "utils/zaggertr.h"
 #include "widgets/capture/colorpicker.h"
 #include "widgets/capture/hovereventfilter.h"
 #include "widgets/capture/modificationcommand.h"
@@ -493,9 +494,8 @@ void CaptureWidget::initMonitorBadge()
       QStringLiteral("#monitorBadge { background: rgba(0,0,0,205);"
                      " color: #ffffff; border-radius: 9px;"
                      " padding: 7px 14px; font-size: 13px; }"));
-    // Purely informational, Chinese on purpose: the fork ships a Chinese UI
-    // and this string is generated at runtime, so it has no .ts entry.
-    badge->setText(QStringLiteral("屏幕 %1/%2 · %3×%4　　按 Tab 切换到下一个屏幕")
+    // Runtime-generated text still goes through the translation catalogue.
+    badge->setText(ZAG_TR("Screen %1/%2 · %3×%4  Press Tab to switch screens")
                      .arg(m_monitorIndex + 1)
                      .arg(screens.size())
                      .arg(geom.width())

@@ -96,6 +96,18 @@
         <source>Set the Arrow as the paint tool</source>
         <translation>选择箭头作为绘画工具</translation>
     </message>
+    <message>
+        <source>Arrow style:</source>
+        <translation>箭头样式：</translation>
+    </message>
+    <message>
+        <source>Curved</source>
+        <translation>曲线</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>默认</translation>
+    </message>
 </context>
 <context>
     <name>BlurTool</name>
@@ -556,6 +568,24 @@ Press Space to open the side panel.</source>
         <location filename="../../src/utils/confighandler.cpp" line="816"/>
         <source>Bad config key &apos;%1&apos; in ConfigHandler. Please report this as a bug.</source>
         <translation>ConfigHandler 中存在错误的配置键“%1”。请向我们报告这个问题。</translation>
+    </message>
+    <message>
+        <source>Bad value in '%1'. Expected: %2
+</source>
+        <translation>‘%1’中的值无效。应为：%2
+</translation>
+    </message>
+    <message>
+        <source>Unrecognized setting: '%1'
+</source>
+        <translation>无法识别的设置：‘%1’
+</translation>
+    </message>
+    <message>
+        <source>Unrecognized shortcut name: '%1'.
+</source>
+        <translation>无法识别的快捷键名称：‘%1’。
+</translation>
     </message>
 </context>
 <context>
@@ -1445,6 +1475,26 @@ Please solve them manually in the configuration file.</source>
         <source>Bypass the freedesktop portal and use Qt&apos;s native X11 screen capture. Enable this if your window manager lacks xdg-desktop-portal (e.g. xmonad, i3). Only effective on X11; ignored on Wayland.</source>
         <translation>绕过 freedesktop 门户，改用 Qt 原生的 X11 屏幕捕获。如果你的窗口管理器没有 xdg-desktop-portal（例如 xmonad、i3），请启用此选项。仅在 X11 下生效，在 Wayland 上会被忽略。</translation>
     </message>
+    <message>
+        <source>Capture active monitor in X11 and Windows (skip monitor selection)</source>
+        <translation>捕获 X11 与 Windows 下的活动显示器（跳过显示器选择）</translation>
+    </message>
+    <message>
+        <source>Close flameshot when idle</source>
+        <translation>空闲时关闭 Flameshot</translation>
+    </message>
+    <message>
+        <source>Draw outline around circle counter</source>
+        <translation>为计数圆圈绘制描边</translation>
+    </message>
+    <message>
+        <source>Use legacy X11 screenshot method</source>
+        <translation>使用旧版 X11 截图方式</translation>
+    </message>
+    <message>
+        <source>Use native fullscreen for capture overlay</source>
+        <translation>截图遮罩使用原生全屏</translation>
+    </message>
 </context>
 <context>
     <name>HistoryWidget</name>
@@ -1835,6 +1885,18 @@ Please solve them manually in the configuration file.</source>
 Click to select</source>
         <translation>显示器 %1: %2
 点击以选择</translation>
+    </message>
+    <message>
+        <source>Monitor %1: %2
+Click or press %1 to select</source>
+        <translation>显示器 %1：%2
+点击或按 %1 选择</translation>
+    </message>
+    <message>
+        <source>Monitor %1: %2
+Click to select</source>
+        <translation>显示器 %1：%2
+点击选择</translation>
     </message>
 </context>
 <context>
@@ -2380,6 +2442,18 @@ You may need to escape the &apos;#&apos; sign as in &apos;\#FFF&apos;</source>
         <source>Change the tool&apos;s thickness</source>
         <translation type="vanished">改变工具的厚度</translation>
     </message>
+    <message>
+        <source>Capture a scrolling screenshot of a selected region.</source>
+        <translation>对选定区域进行滚动截图。</translation>
+    </message>
+    <message>
+        <source>Render annotation markers and measure their pixels.</source>
+        <translation>渲染标注标记并测量其像素。</translation>
+    </message>
+    <message>
+        <source>Run in the background: tray icon and global hotkeys only.</source>
+        <translation>后台运行：仅显示托盘图标并启用全局热键。</translation>
+    </message>
 </context>
 <context>
     <name>RectangleTool</name>
@@ -2554,6 +2628,18 @@ You may need to escape the &apos;#&apos; sign as in &apos;\#FFF&apos;</source>
         <source>Scaling screenshot to: %1 %2</source>
         <translation>正在将截图缩放至：%1 %2</translation>
     </message>
+    <message>
+        <source>Screenshot portal unavailable, using direct X11 capture</source>
+        <translation>截图门户不可用，改用直接 X11 抓屏</translation>
+    </message>
+    <message>
+        <source>The `org.freedesktop.portal.Screenshot` request failed: %1</source>
+        <translation>`org.freedesktop.portal.Screenshot` 请求失败：%1</translation>
+    </message>
+    <message>
+        <source>Unable to capture the selected monitor</source>
+        <translation>无法捕获所选显示器</translation>
+    </message>
 </context>
 <context>
     <name>SecondaryInstanceWidget</name>
@@ -2628,6 +2714,10 @@ You may need to escape the &apos;#&apos; sign as in &apos;\#FFF&apos;</source>
         <location filename="../../src/config/setshortcutwidget.cpp" line="55"/>
         <source>Flameshot must be restarted for changes to take effect.</source>
         <translation>火焰截图必须重新启动以使修改生效。</translation>
+    </message>
+    <message>
+        <source>Changes apply immediately.</source>
+        <translation>更改立即生效。</translation>
     </message>
 </context>
 <context>
@@ -3131,6 +3221,14 @@ You may need to escape the &apos;#&apos; sign as in &apos;\#FFF&apos;</source>
         <source>Click on this button to set the edition mode of the contrast color.</source>
         <translation>点击按钮设置对比色。</translation>
     </message>
+    <message>
+        <source>Hex for Contrast Color</source>
+        <translation>对比色的十六进制值</translation>
+    </message>
+    <message>
+        <source>Hex for Main Color</source>
+        <translation>主色的十六进制值</translation>
+    </message>
 </context>
 <context>
     <name>UndoTool</name>
@@ -3427,6 +3525,195 @@ You may need to escape the &apos;#&apos; sign as in &apos;\#FFF&apos;</source>
         <location filename="../../build/_deps/qtcolorwidgets-src/src/QtColorWidgets/swatch.cpp" line="864"/>
         <source>%1 (%2)</source>
         <translation>%1 (%2)</translation>
+    </message>
+</context>
+<context>
+    <name>ZaggerUI</name>
+    <!-- Strings added by the zagger fork: scroll capture UI, global
+         shortcut descriptions, tray entry, monitor badge, diagnostics.
+         Source text is English; other catalogues fall back to it. -->
+    <message>
+        <source>=== Flameshot self-test ===</source>
+        <translation>=== Flameshot 自检 ===</translation>
+    </message>
+    <message>
+        <source>Processes:</source>
+        <translation>进程数:</translation>
+    </message>
+    <message>
+        <source>Config:</source>
+        <translation>配置:</translation>
+    </message>
+    <message>
+        <source>Log:</source>
+        <translation>日志:</translation>
+    </message>
+    <message>
+        <source>Crash reports:</source>
+        <translation>崩溃报告:</translation>
+    </message>
+    <message>
+        <source>(no crash records: the process exited normally or was terminated, not a crash)</source>
+        <translation>（没有崩溃记录，说明进程是正常退出或被结束，不是崩溃）</translation>
+    </message>
+    <message>
+        <source>--- Last %1 log lines ---</source>
+        <translation>--- 日志最后 %1 行 ---</translation>
+    </message>
+    <message>
+        <source>Press Ctrl+Alt+A to capture, Ctrl+Alt+S for scrolling capture</source>
+        <translation>按 Ctrl+Alt+A 截图，Ctrl+Alt+S 滚动截图</translation>
+    </message>
+    <message>
+        <source>Flameshot is already running</source>
+        <translation>Flameshot 已在运行</translation>
+    </message>
+    <message>
+        <source>Close Active Pinned Window</source>
+        <translation>关闭当前固定窗口</translation>
+    </message>
+    <message>
+        <source>Capture screen (global)</source>
+        <translation>截图（全局）</translation>
+    </message>
+    <message>
+        <source>Capture screen, secondary (global)</source>
+        <translation>备用截图（全局）</translation>
+    </message>
+    <message>
+        <source>Screenshot history / open save folder (global)</source>
+        <translation>截图历史 / 打开保存目录（全局）</translation>
+    </message>
+    <message>
+        <source>Scrolling capture (global)</source>
+        <translation>滚动截图（全局）</translation>
+    </message>
+    <message>
+        <source>Scrolling capture…</source>
+        <translation>滚动截屏中…</translation>
+    </message>
+    <message>
+        <source>Scrolling capture</source>
+        <translation>滚动截图</translation>
+    </message>
+    <message>
+        <source>Snapped to scroll container · Enter to start, drag to adjust</source>
+        <translation>已吸附到滚动容器 · 回车开始，可拖动</translation>
+    </message>
+    <message>
+        <source>Snapped: %1 · Enter to start, drag to adjust</source>
+        <translation>已吸附：%1 · 回车开始，可拖动</translation>
+    </message>
+    <message>
+        <source>Scrollable area detected</source>
+        <translation>识别到可滚动区域</translation>
+    </message>
+    <message>
+        <source>Detected: %1</source>
+        <translation>已识别：%1</translation>
+    </message>
+    <message>
+        <source>Scrolling capture: adjust the content area, then start</source>
+        <translation>滚动截屏：调整要滚动的内容区域，然后开始</translation>
+    </message>
+    <message>
+        <source>Scrolling capture: no container found, will use wheel scrolling</source>
+        <translation>滚动截屏：未识别到滚动容器，将用滚轮方式尝试</translation>
+    </message>
+    <message>
+        <source>Drag to adjust · Arrow keys to nudge · Enter to start · Esc to cancel</source>
+        <translation>拖动调整区域 · 方向键微调 · Enter 开始 · Esc 取消</translation>
+    </message>
+    <message>
+        <source>Start scrolling</source>
+        <translation>开始滚动</translation>
+    </message>
+    <message>
+        <source>No scrollable content</source>
+        <translation>没有可滚动的内容</translation>
+    </message>
+    <message>
+        <source>No window inside the selection. Frame a page or document content area.</source>
+        <translation>框选范围内没有窗口，请框住网页或文档的内容区</translation>
+    </message>
+    <message>
+        <source>Selection is outside the window</source>
+        <translation>选区不在窗口内</translation>
+    </message>
+    <message>
+        <source>Frame the whole content window and try again</source>
+        <translation>请把要滚动的内容窗口完整框住再试</translation>
+    </message>
+    <message>
+        <source>Remote desktop windows are not supported</source>
+        <translation>不支持远程桌面窗口</translation>
+    </message>
+    <message>
+        <source>Install Flameshot on the remote machine instead</source>
+        <translation>请在远程机器上直接安装 Flameshot</translation>
+    </message>
+    <message>
+        <source>Detecting scroll container…</source>
+        <translation>识别滚动容器中…</translation>
+    </message>
+    <message>
+        <source>Rewinding to the top, long pages may take half a minute…</source>
+        <translation>正在回到顶部，长页面可能需要半分钟…</translation>
+    </message>
+    <message>
+        <source>Preparing, press Esc to stop</source>
+        <translation>准备中，按 Esc 停止</translation>
+    </message>
+    <message>
+        <source>Stitched %1 px · frame %2 · Esc to stop</source>
+        <translation>已拼接 %1 px · 第 %2 帧 · Esc 停止</translation>
+    </message>
+    <message>
+        <source>Selection cannot scroll</source>
+        <translation>选区无法滚动</translation>
+    </message>
+    <message>
+        <source>Static screenshot saved</source>
+        <translation>已保存静态截图</translation>
+    </message>
+    <message>
+        <source>Scrolling capture incomplete</source>
+        <translation>滚动截图未完成</translation>
+    </message>
+    <message>
+        <source>The selection did not scroll, try another content area</source>
+        <translation>选区没有滚动，换一块内容区再试</translation>
+    </message>
+    <message>
+        <source>· fixed sidebar removed</source>
+        <translation>· 已去掉固定侧栏</translation>
+    </message>
+    <message>
+        <source>Scrolling capture complete</source>
+        <translation>滚动截图完成</translation>
+    </message>
+    <message>
+        <source>Saved and copied to clipboard</source>
+        <translation>已保存并复制到剪贴板</translation>
+    </message>
+    <message>
+        <source>· Limit reached, remaining page not captured</source>
+        <translation>· 已达上限，页面剩余部分未截入</translation>
+    </message>
+    <message>
+        <source>Screen %1/%2 · %3×%4  Press Tab to switch screens</source>
+        <translation>屏幕 %1/%2 · %3×%4　　按 Tab 切换到下一个屏幕</translation>
+    </message>
+</context>
+<context>
+    <name>ScrollCaptureTool</name>
+    <message>
+        <source>Scroll a page and stitch it into one long image</source>
+        <translation>滚动页面并拼接为一张长图</translation>
+    </message>
+    <message>
+        <source>Scrolling Capture</source>
+        <translation>滚动截图</translation>
     </message>
 </context>
 </TS>

@@ -18,6 +18,17 @@ class ConfigWindow : public QWidget
 public:
     explicit ConfigWindow(QWidget* parent = nullptr);
 
+    // Used when the UI language is switched at runtime: the window is
+    // re-created so all hand-built labels pick up the new translation, and
+    // the active tab / position are restored afterwards.
+    int currentTab() const { return m_tabWidget->currentIndex(); }
+    void setCurrentTab(int index)
+    {
+        if (index >= 0 && index < m_tabWidget->count()) {
+            m_tabWidget->setCurrentIndex(index);
+        }
+    }
+
 signals:
     void updateChildren();
 

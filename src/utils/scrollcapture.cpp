@@ -17,6 +17,7 @@
 #include "utils/confighandler.h"
 #include "utils/scrolluia.h"
 #include "utils/windowforeground.h"
+#include "utils/zaggertr.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -307,7 +308,7 @@ protected:
         painter.setFont(title);
         painter.drawText(QRect(16, 12, width() - 60, 24),
                          Qt::AlignLeft | Qt::AlignVCenter,
-                         m_title.isEmpty() ? QStringLiteral("滚动截屏中…")
+                         m_title.isEmpty() ? ZAG_TR("Scrolling capture…")
                                            : m_title);
         if (m_badge.isValid()) {
             painter.setPen(Qt::NoPen);
@@ -375,7 +376,7 @@ public:
         setMouseTracking(true);
         setFocusPolicy(Qt::StrongFocus);
         setCursor(Qt::CrossCursor);
-        setWindowTitle(QStringLiteral("滚动截屏"));
+        setWindowTitle(ZAG_TR("Scrolling capture"));
         setGeometry(screen->geometry());
         m_origin = screen->geometry().topLeft();
         m_frame = QRect(QPoint(0, 0), size());
@@ -466,13 +467,13 @@ protected:
             QString tag;
             if (snapped) {
                 tag = m_detectedLabel.isEmpty()
-                        ? QStringLiteral("已吸附到滚动容器 · 回车开始，可拖动")
-                        : QStringLiteral("已吸附：%1 · 回车开始，可拖动")
+                        ? ZAG_TR("Snapped to scroll container · Enter to start, drag to adjust")
+                        : ZAG_TR("Snapped: %1 · Enter to start, drag to adjust")
                               .arg(m_detectedLabel);
             } else {
                 tag = m_detectedLabel.isEmpty()
-                        ? QStringLiteral("识别到可滚动区域")
-                        : QStringLiteral("已识别：%1").arg(m_detectedLabel);
+                        ? ZAG_TR("Scrollable area detected")
+                        : ZAG_TR("Detected: %1").arg(m_detectedLabel);
             }
             drawChip(p,
                      QPoint(m_detected.left(),
@@ -504,8 +505,8 @@ protected:
 
         const QString headline =
           m_detected.isValid()
-            ? QStringLiteral("滚动截屏：调整要滚动的内容区域，然后开始")
-            : QStringLiteral("滚动截屏：未识别到滚动容器，将用滚轮方式尝试");
+            ? ZAG_TR("Scrolling capture: adjust the content area, then start")
+            : ZAG_TR("Scrolling capture: no container found, will use wheel scrolling");
         QFont title = font();
         title.setPointSizeF(title.pointSizeF() + 1.5);
         title.setBold(true);
@@ -527,8 +528,8 @@ protected:
         p.setPen(QColor(203, 213, 225));
         p.drawText(bar.adjusted(18, 0, -140, 0),
                    Qt::AlignLeft | Qt::AlignVCenter,
-                   QStringLiteral(
-                     "拖动调整区域 · 方向键微调 · Enter 开始 · Esc 取消"));
+                   ZAG_TR(
+                     "Drag to adjust · Arrow keys to nudge · Enter to start · Esc to cancel"));
 
         const QRect go = goButtonRect();
         p.setPen(Qt::NoPen);
@@ -538,7 +539,7 @@ protected:
         QFont bold = font();
         bold.setBold(true);
         p.setFont(bold);
-        p.drawText(go, Qt::AlignCenter, QStringLiteral("开始滚动"));
+        p.drawText(go, Qt::AlignCenter, ZAG_TR("Start scrolling"));
     }
 
     void mousePressEvent(QMouseEvent* e) override
@@ -2214,9 +2215,9 @@ void ScrollCapture::start(const QRect& preselectedRegion)
           << QStringLiteral("Scrolling capture: no application window inside "
                             "the selection, nothing can scroll here");
         CaptureHud hud(region, screen);
-        hud.setTitle(QStringLiteral("没有可滚动的内容"));
+        hud.setTitle(ZAG_TR("No scrollable content"));
         hud.setStatus(
-          QStringLiteral("框选范围内没有窗口，请框住网页或文档的内容区"));
+          ZAG_TR("No window inside the selection. Frame a page or document content area."));
         pause(1900);
         emit finished(false, QStringLiteral("no window inside the selection"));
         return;
@@ -2273,8 +2274,8 @@ void ScrollCapture::start(const QRect& preselectedRegion)
         } else if (!windowClient.intersects(region)) {
             CaptureHud bad(region, screen);
             bad.setBadge(QColor(239, 68, 68));
-            bad.setTitle(QStringLiteral("选区不在窗口内"));
-            bad.setStatus(QStringLiteral("请把要滚动的内容窗口完整框住再试"));
+            bad.setTitle(ZAG_TR("Selection is outside the window"));
+            bad.setStatus(ZAG_TR("Frame the whole content window and try again"));
             pause(2200);
             emit finished(false,
                           QStringLiteral("selection is outside the target "
@@ -2293,9 +2294,9 @@ void ScrollCapture::start(const QRect& preselectedRegion)
                .arg(target.title);
         CaptureHud warnHud(region, screen);
         warnHud.setBadge(QColor(239, 68, 68));
-        warnHud.setTitle(QStringLiteral("不支持远程桌面窗口"));
+        warnHud.setTitle(ZAG_TR("Remote desktop windows are not supported"));
         warnHud.setStatus(
-          QStringLiteral("请在远程机器上直接安装 Flameshot"));
+          ZAG_TR("Install Flameshot on the remote machine instead"));
         pause(3000);
         emit finished(false,
                       QStringLiteral("remote desktop viewer: %1")
@@ -2307,7 +2308,7 @@ void ScrollCapture::start(const QRect& preselectedRegion)
     // the page is wheeled back to the top (a long page can take half a
     // minute, and total silence there reads as "the app froze").
     CaptureHud hud(region, screen);
-    hud.setStatus(QStringLiteral("识别滚动容器中…"));
+    hud.setStatus(ZAG_TR("Detecting scroll container…"));
     QCoreApplication::processEvents();
 
     // A window that sits behind another one would be blitted partially hidden,
@@ -2643,7 +2644,7 @@ void ScrollCapture::start(const QRect& preselectedRegion)
                 AbstractLogger::info(AbstractLogger::LogFile)
                   << QStringLiteral("Content was scrolled, rewinding to the "
                                     "top with wheel notches");
-                hud.setStatus(QStringLiteral("正在回到顶部，长页面可能需要半分钟…"));
+                hud.setStatus(ZAG_TR("Rewinding to the top, long pages may take half a minute…"));
                 QCoreApplication::processEvents();
                 QImage last = afterProbe;
                 int stillCount = 0;
@@ -2721,7 +2722,7 @@ void ScrollCapture::start(const QRect& preselectedRegion)
     const QString dumpDir =
       QString::fromLocal8Bit(qgetenv("FLAMESHOT_SCROLL_DUMP"));
 
-    hud.setStatus(QStringLiteral("准备中，按 Esc 停止"));
+    hud.setStatus(ZAG_TR("Preparing, press Esc to stop"));
 
     Canvas canvas;
     canvas.reset(first.width());
@@ -2976,7 +2977,7 @@ void ScrollCapture::start(const QRect& preselectedRegion)
         } else if (dy < 120 && stepNotches < notches) {
             ++stepNotches;
         }
-        hud.setStatus(QStringLiteral("已拼接 %1 px · 第 %2 帧 · Esc 停止")
+        hud.setStatus(ZAG_TR("Stitched %1 px · frame %2 · Esc to stop")
                         .arg(canvas.used + dy)
                         .arg(frames + 1));
         QCoreApplication::processEvents();
@@ -3024,15 +3025,15 @@ void ScrollCapture::start(const QRect& preselectedRegion)
         const QString path = exportResult(first);
         if (!path.isEmpty()) {
             hud.setBadge(QColor(239, 68, 68)); // red: nothing scrolled
-            hud.setTitle(QStringLiteral("选区无法滚动"));
-            hud.setStatus(QStringLiteral("已保存静态截图"));
+            hud.setTitle(ZAG_TR("Selection cannot scroll"));
+            hud.setStatus(ZAG_TR("Static screenshot saved"));
             pause(1500);
             emit finished(true, path);
             return;
         }
         hud.setBadge(QColor(239, 68, 68));
-        hud.setTitle(QStringLiteral("滚动截图未完成"));
-        hud.setStatus(QStringLiteral("选区没有滚动，换一块内容区再试"));
+        hud.setTitle(ZAG_TR("Scrolling capture incomplete"));
+        hud.setStatus(ZAG_TR("The selection did not scroll, try another content area"));
         pause(1800);
         emit finished(false,
                       QStringLiteral("the selection did not scroll: %1")
@@ -3059,7 +3060,7 @@ void ScrollCapture::start(const QRect& preselectedRegion)
                              result.height());
             if (keep.width() >= 120) {
                 result = result.copy(keep);
-                sideNote = QStringLiteral(" · 已去掉固定侧栏");
+                sideNote = QStringLiteral(" ") + ZAG_TR("· fixed sidebar removed");
                 AbstractLogger::info(AbstractLogger::LogFile)
                   << QStringLiteral("Static side panel removed: left=%1px "
                                     "right=%2px, result width %3 px")
@@ -3113,10 +3114,10 @@ void ScrollCapture::start(const QRect& preselectedRegion)
         hud.setBadge(degradedSteps > 0 || truncated
                        ? QColor(234, 179, 8)   // yellow
                        : QColor(34, 197, 94)); // green
-        hud.setTitle(QStringLiteral("滚动截图完成"));
-        QString status = QStringLiteral("已保存并复制到剪贴板") + sideNote;
+        hud.setTitle(ZAG_TR("Scrolling capture complete"));
+        QString status = ZAG_TR("Saved and copied to clipboard") + sideNote;
         if (truncated) {
-            status += QStringLiteral(" · 已达上限，页面剩余部分未截入");
+            status += QStringLiteral(" ") + ZAG_TR("· Limit reached, remaining page not captured");
         }
         hud.setStatus(status);
         pause(1500);

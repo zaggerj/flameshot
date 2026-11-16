@@ -1,4 +1,7 @@
 #include <QSystemTrayIcon>
+#include <QByteArray>
+#include <QPair>
+#include <QVector>
 
 #pragma once
 
@@ -18,6 +21,7 @@ public:
 private:
     void initTrayIcon();
     void initMenu();
+    void retranslateMenu();
     void initScreenMenu();
     void updateCaptureActionShortcut();
 #if !defined(DISABLE_UPDATE_CHECKER)
@@ -27,6 +31,10 @@ private:
     void startGuiCapture();
     void startGuiCaptureOnScreen(int screenIndex);
 
+    // Source texts of every tr()-based menu action, so a runtime language
+    // switch can re-run tr() without rebuilding the menu (and without losing
+    // the signal connections).
+    QVector<QPair<QAction*, QByteArray>> m_trActions;
     QMenu* m_menu;
     QMenu* m_screenMenu;
     QAction* m_captureAction;

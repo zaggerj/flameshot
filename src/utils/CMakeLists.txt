@@ -3,6 +3,8 @@ target_sources(
   flameshot
   PRIVATE abstractlogger.h
           crashhandler.h
+          translationmanager.h
+          zaggertr.h
           filenamehandler.h
           screengrabber.h
           systemnotification.h
@@ -14,6 +16,7 @@ target_sources(
   flameshot
   PRIVATE abstractlogger.cpp
           crashhandler.cpp
+          translationmanager.cpp
           filenamehandler.cpp
           screengrabber.cpp
           monitorpreview.cpp

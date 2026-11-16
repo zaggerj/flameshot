@@ -7,6 +7,7 @@
 #include "config/extendedslider.h"
 #include "config/uicoloreditor.h"
 #include "utils/confighandler.h"
+#include "utils/translationmanager.h"
 
 #include <QCompleter>
 #include <QDirIterator>
@@ -145,16 +146,15 @@ void VisualsEditor::initTranslations()
     // (popup click, or Enter on a completed match) - unlike
     // currentTextChanged, which the now-editable/filterable combobox would
     // otherwise emit on every keystroke while typing to search.
+    //
+    // Runtime switch (upstream used to require a restart here): the manager
+    // reloads both translators and emits languageChanged(); Flameshot rebuilds
+    // this config window in place and TrayIcon re-translates its menu.
     connect(m_selectTranslation,
             &QComboBox::textActivated,
             this,
             [this](const QString& text) {
-                ConfigHandler().setUiLanguage(text);
-                // TODO: Retranslate UI without restart
-                QMessageBox::information(
-                  this,
-                  tr("Configuration"),
-                  tr("Flameshot must be restarted to apply these changes!"));
+                TranslationManager::instance()->applyLanguage(text);
             });
 
     localLayout->addWidget(m_selectTranslation);

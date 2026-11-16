@@ -91,6 +91,7 @@ public slots:
 
 private:
     Flameshot();
+    void onLanguageChanged();
     bool resolveAnyConfigErrors();
 
     // class members

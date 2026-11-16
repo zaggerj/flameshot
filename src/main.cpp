@@ -56,6 +56,8 @@
 #include <QSharedMemory>
 #include <QTimer>
 #include <QTranslator>
+#include "utils/translationmanager.h"
+#include "utils/zaggertr.h"
 
 // Required for saving button list QList<CaptureTool::Type>
 Q_DECLARE_METATYPE(QList<int>)
@@ -114,15 +116,15 @@ int runDoctor()
         }
         CloseHandle(snapshot);
     }
-    out << "=== Flameshot 自检 ===\n";
-    out << "进程数: " << pids.size() << "\n";
+    out << ZAG_TR("=== Flameshot self-test ===") << "\n";
+    out << ZAG_TR("Processes:") << " " << pids.size() << "\n";
     for (unsigned long pid : pids) {
         out << "  pid " << pid << "\n";
     }
 
     // 2. would the tray show up at all?
     ConfigHandler config;
-    out << "配置: " << config.configFilePath() << "\n";
+    out << ZAG_TR("Config:") << " " << config.configFilePath() << "\n";
     out << "  disabledTrayIcon   = "
         << (config.disabledTrayIcon() ? "true" : "false") << "\n";
     out << "  autoCloseIdleDaemon= "
@@ -139,10 +141,10 @@ int runDoctor()
     const QString crashDir = logDir + QStringLiteral("/crashes");
     const QStringList crashes =
       QDir(crashDir).entryList({ "crash-*", "abort-*" }, QDir::Files);
-    out << "日志: " << CrashHandler::logFilePath() << "\n";
-    out << "崩溃报告: " << crashes.size() << " 个";
+    out << ZAG_TR("Log:") << " " << CrashHandler::logFilePath() << "\n";
+    out << ZAG_TR("Crash reports:") << " " << crashes.size();
     if (crashes.isEmpty()) {
-        out << "（没有崩溃记录，说明进程是正常退出或被结束，不是崩溃）";
+        out << ZAG_TR("(no crash records: the process exited normally or was terminated, not a crash)");
     }
     out << "\n";
     for (const QString& name : crashes) {
@@ -155,7 +157,7 @@ int runDoctor()
         const QStringList lines = QString::fromUtf8(log.readAll())
                                     .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
         const int from = qMax(0, lines.size() - 12);
-        out << "--- 日志最后 " << (lines.size() - from) << " 行 ---\n";
+        out << ZAG_TR("--- Last %1 log lines ---").arg(lines.size() - from) << "\n";
         for (int i = from; i < lines.size(); ++i) {
             out << lines.at(i) << "\n";
         }
@@ -213,83 +215,7 @@ int requestCaptureAndWait(const CaptureRequest& req){
     return shm;
 }
 
-void configureTranslation(QTranslator& translator, QTranslator& qtTranslator)
-{
-    bool foundTranslation;
-    // Configure translations
-    for (const QString& path : PathInfo::translationsPaths()) {
-        if (ConfigHandler().uiLanguage() == QStringLiteral("auto")) {
-            // Load language, which was detected from the system
-            foundTranslation =
-              translator.load(QLocale(),
-                              QStringLiteral("Internationalization"),
-                              QStringLiteral("_"),
-                              path);
-            if (!foundTranslation) {
-                // Neither the exact locale nor the bare language is shipped
-                // (it_CH with only it_IT available): take any translation
-                // of the same language rather than falling back to English.
-                QString language = QLocale().name().section('_', 0, 0);
-                QStringList sameLanguage = QDir(path).entryList(
-                  { QStringLiteral("Internationalization_%1_*.qm")
-                      .arg(language) },
-                  QDir::Files);
-                foundTranslation =
-                  !sameLanguage.isEmpty() &&
-                  translator.load(sameLanguage.constFirst(), path);
-            }
-        } else {
-            // Load language from settings
-            foundTranslation =
-              translator.load(QStringLiteral("Internationalization_") +
-                                ConfigHandler().uiLanguage(),
-                              path);
-        }
-        if (foundTranslation) {
-            break;
-        }
-    }
-    if (!foundTranslation) {
-        if (ConfigHandler().uiLanguage() == QStringLiteral("auto")) {
-            QLocale l;
-            qWarning() << QStringLiteral(
-                            "No Flameshot translation found for %1")
-                            .arg(l.uiLanguages().join(", "));
-        } else {
-            qWarning() << QStringLiteral(
-                            "No Flameshot translation found for %1")
-                            .arg(ConfigHandler().uiLanguage());
-        }
-    }
-
-    if (ConfigHandler().uiLanguage() == QStringLiteral("auto")) {
-        foundTranslation =
-          qtTranslator.load(QLocale::system(),
-                            "qt",
-                            "_",
-                            QLibraryInfo::path(QLibraryInfo::TranslationsPath));
-    } else {
-        foundTranslation = qtTranslator.load(
-          QStringLiteral("qt_") + ConfigHandler().uiLanguage(),
-
-          QLibraryInfo::path(QLibraryInfo::TranslationsPath));
-    }
-    if (!foundTranslation) {
-        if (ConfigHandler().uiLanguage() == QStringLiteral("auto")) {
-            qWarning() << QStringLiteral("No Qt translation found for %1")
-                            .arg(QLocale::languageToString(
-                              QLocale::system().language()));
-        } else {
-            qWarning() << QStringLiteral("No Qt translation found for %1")
-                            .arg(ConfigHandler().uiLanguage());
-        }
-    }
-
-    qApp->installTranslator(&translator);
-    qApp->installTranslator(&qtTranslator);
-}
-
-void configureApp(bool gui, QTranslator& translator, QTranslator& qtTranslator)
+void configureApp(bool gui)
 {
     if (gui) {
 #if defined(Q_OS_WIN) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
@@ -301,7 +227,9 @@ void configureApp(bool gui, QTranslator& translator, QTranslator& qtTranslator)
 
     auto app = QCoreApplication::instance();
     app->setAttribute(Qt::AA_DontCreateNativeWidgetSiblings, true);
-    configureTranslation(translator, qtTranslator);
+    // TranslationManager owns the translators for the whole process, so the
+    // UI language can be switched at runtime without restarting the daemon.
+    TranslationManager::instance()->initialize();
 }
 
 #if defined(USE_KDSINGLEAPPLICATION)
@@ -442,8 +370,8 @@ void dispatchForwardedRequest(const QByteArray& raw)
         // feedback, otherwise "nothing happens" reads as "the app is broken".
         if (FlameshotDaemon::instance() != nullptr) {
             FlameshotDaemon::instance()->sendTrayNotification(
-              QStringLiteral("按 Ctrl+Alt+A 截图，Ctrl+Alt+S 滚动截图"),
-              QStringLiteral("Flameshot 已在运行"));
+              ZAG_TR("Press Ctrl+Alt+A to capture, Ctrl+Alt+S for scrolling capture"),
+              ZAG_TR("Flameshot is already running"));
         }
     } else {
         AbstractLogger::warning(AbstractLogger::LogFile)
@@ -566,8 +494,6 @@ static int runRenderSelfTest(const QString& outputDir)
 int main(int argc, char* argv[])
 {
 
-    QTranslator translator, qtTranslator;
-
     // Required for saving button list QList<CaptureTool::Type>
     qRegisterMetaType<QList<int>>();
 
@@ -583,7 +509,7 @@ int main(int argc, char* argv[])
     // reference it is undefined behaviour, and it left the process without a
     // platform plugin whenever a widget was constructed a moment too early.
     QApplication app(argc, argv);
-    configureApp(true, translator, qtTranslator);
+    configureApp(true);
     CrashHandler::install();
 
     // One line per launch in the rolling log. Together with the matching

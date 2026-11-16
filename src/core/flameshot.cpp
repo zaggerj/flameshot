@@ -66,6 +66,7 @@ void raiseAboveMenuBar(QWidget* widget)
 #include "config/cacheutils.h"
 #include "config/configresolver.h"
 #include "config/configwindow.h"
+#include "utils/translationmanager.h"
 #include "core/qguiappcurrentscreen.h"
 #include "utils/abstractlogger.h"
 #include "utils/confighandler.h"
@@ -109,6 +110,11 @@ Flameshot::Flameshot()
 {
     QString StyleSheet = CaptureButton::globalStyleSheet();
     qApp->setStyleSheet(StyleSheet);
+
+    connect(TranslationManager::instance(),
+            &TranslationManager::languageChanged,
+            this,
+            &Flameshot::onLanguageChanged);
 
 #if defined(Q_OS_MACOS)
     // Request Screen Recording permission via the proper CoreGraphics API
@@ -331,6 +337,33 @@ void Flameshot::launcher()
 #if defined(Q_OS_MACOS)
     showDockIcon(m_launcherWindow);
 #endif
+}
+
+void Flameshot::onLanguageChanged()
+{
+    // Hand-built Qt widgets do not re-run their constructor-time setText()
+    // calls on QEvent::LanguageChange, so re-create the config window in
+    // place. QPointer makes the old pointer safe while deleteLater() runs.
+    if (m_configWindow) {
+        const int tab = m_configWindow->currentTab();
+        const QPoint pos = m_configWindow->pos();
+        m_configWindow->deleteLater();
+        m_configWindow = nullptr;
+        config();
+        if (m_configWindow) {
+            m_configWindow->setCurrentTab(tab);
+            m_configWindow->move(pos);
+        }
+    }
+    // Short-lived windows: close so the next open uses the new language.
+    if (m_infoWindow) {
+        m_infoWindow->deleteLater();
+        m_infoWindow = nullptr;
+    }
+    if (m_launcherWindow) {
+        m_launcherWindow->deleteLater();
+        m_launcherWindow = nullptr;
+    }
 }
 
 void Flameshot::config()
